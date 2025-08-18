@@ -56,6 +56,7 @@ int main(int argc, char** argv)
         
         int max_iter = opt.get_iterations();
         int learn_vars = opt.get_learn_vars();
+        int learn_prior_delay = opt.get_learn_prior_delay();
         double stop_criteria_thr = opt.get_stop_criteria_thr();
         double merge_vars_thr = opt.get_merge_vars_thr();
         int CG_max_iter = opt.get_CG_max_iter();
@@ -65,13 +66,13 @@ int main(int argc, char** argv)
         double rho = opt.get_rho();
         std::vector<double> vars = opt.get_vars();
         std::vector<double> probs = opt.get_probs();
+        std::vector<double> x1hat_init = std::vector<double> (M, 0.0);
 
         // Read true signals, if provided
         std::vector<double> true_signal;
         if(opt.get_true_signal_file() != "")
             true_signal = mpi_read_vec_from_file(opt.get_true_signal_file(), M, S);
-        else 
-            //throw ("FATAL: True signal file not provided!");
+        else
             true_signal = std::vector<double> (M, 0.0);
 
         // ---------------- running VAMP algorithm -------------------- //
@@ -88,11 +89,13 @@ int main(int argc, char** argv)
                     EM_err_thr,
                     rho,
                     learn_vars,
+                    learn_prior_delay,
                     stop_criteria_thr,
                     merge_vars_thr,
                     vars,
                     probs,
                     true_signal,
+                    x1hat_init,
                     out_dir,
                     out_name,
                     model,

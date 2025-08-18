@@ -67,16 +67,16 @@ vamp::vamp( int N,
             verbosity(verbosity),
             rank(rank){
 
-                //x1_hat = std::vector<double> (M, 0.0);
-                for (int i0=0; i0<x1_hat.size(); i0++)
-                    x1_hat[i0] =  x1hat_init[i0] / sqrt(N);
+                x1_hat = std::vector<double> (M, 0.0);
+                //for (int i0=0; i0<x1_hat.size(); i0++)
+                //    x1_hat[i0] =  x1hat_init[i0] / sqrt(N);
                 
                 x2_hat = std::vector<double> (M, 0.0);
                 
                 //r1 = simulate(M, std::vector<double> {1.0 / gam1}, std::vector<double> {1});
-                //r1 = std::vector<double> (M, 0.0);
-                for (int i0=0; i0<x1_hat.size(); i0++)
-                    r1[i0] =  x1hat_init[i0] / sqrt(N);
+                r1 = std::vector<double> (M, 0.0);
+                //for (int i0=0; i0<x1_hat.size(); i0++)
+                //    r1[i0] =  x1hat_init[i0] / sqrt(N);
                 
                 r2 = std::vector<double> (M, 0.0);
                 p1 = std::vector<double> (N, 0.0);

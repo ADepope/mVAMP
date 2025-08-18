@@ -135,8 +135,8 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
             //gam1_reEst_prev = gam1;
             //gam1 = std::min( std::max(  1 / (1/eta1 + l2_norm2(x1_hat_m_r1, 1)/Mt), gamma_min ), gamma_max );
 
-            //updatePrior();
-            if (it > 1) updatePrior();
+            if (it > learn_prior_delay)
+                updatePrior();
 
             // prior distribution parameters
             if (rank == 0){
