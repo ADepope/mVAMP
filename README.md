@@ -1,213 +1,244 @@
 # mVAMP
-mVAMP is Vector Approximate Message Passing method for analyzing omics data, written in C++ (source code in src/).
 
-This repository also contains scripts for data simulations and post-processing on methylation data.
+mVAMP fits sparse Bayesian regression models of an outcome on DNA methylation data using
+**Vector Approximate Message Passing (VAMP)**. It is written in C++ and parallelised with MPI
+(markers are split across ranks) and OpenMP (threads within a rank).
 
-simulation/sim_top_iid.py - loading adjusted and standardized methylation data from zarr files and simulate iid phenotype on the top.
+What it does:
 
-# Example
-## Data simulation
-Python script ``data_sim.py`` can be used to generate example i.i.d. design matrix (``example.bin``), marker effects (``example_ts.bin``) and coresponding continues outcome (``example.phen``)
+- **Linear model** for continuous outcomes, and a **probit model** for binary outcomes.
+- **Adaptive prior**: marker effects follow a spike-and-slab mixture of Gaussians. The mixture
+  probabilities and variances are learned during inference with expectation maximisation (EM).
+- **Out-of-sample testing** of the estimated effects on a held-out set.
+- **Association testing**: a p-value for each marker, from state evolution (`se`) or
+  leave-one-out regression (`loo`).
+
+## Repository layout
+
 ```
-python3 data_sim.py --out-dir ...
+src/          C++ source: VAMP inference (vamp.cpp, vamp_probit.cpp), data handling, options
+simulation/   Python scripts to simulate example data
+scripts/      Python scripts to post-process mVAMP output (p-values, plots, metrics)
 ```
 
-This creates following files in specified output directory:
- - ``example.bin`` file with data for each sample. Data are stored as 8 byte DOUBLE precision numbers. Whole file is sequence of M marker blocks, where each block contains N 8 byte DOUBLE precision values corespoding to each sample.
- - ``example_ts.bin`` file with true signals in binary format. File contains M 8 byte DOUBLE precision values, coresponding to true signals used for simulation.
- - ``example.phen`` file with simulated phenotype in PLINK format.
+## Requirements
+
+- A C++17 compiler with OpenMP support (tested with GCC)
+- An MPI implementation (e.g. OpenMPI)
+- Boost (`math` and `numeric/ublas`, header-only)
+- For the Python scripts: `numpy`, `scipy`, `pandas`, `matplotlib`, `scikit-learn`, and `zarr`
+  for `simulation/sim_top_iid.py`
 
 ## Compilation
-Assuming standard HPC environment, we can compile the software using mpic++. Path to source code has to be specified.
 
+There are two executables: `main_meth.exe` for the linear model and `main_meth_probit.exe` for
+the probit model. Both are compiled together with `vamp.cpp`, which also includes
+`vamp_probit.cpp`.
+
+```bash
+module load gcc openmpi boost   # or however your system provides them
+
+vloc=path/to/mVAMP/src
+FLAGS="-march=native -Ofast -fopenmp -lstdc++fs"
+
+mpic++ ${vloc}/main_meth.cpp ${vloc}/vamp.cpp ${vloc}/utilities.cpp ${vloc}/data.cpp ${vloc}/options.cpp ${FLAGS} -o ${vloc}/main_meth.exe
+
+mpic++ ${vloc}/main_meth_probit.cpp ${vloc}/vamp.cpp ${vloc}/utilities.cpp ${vloc}/data.cpp ${vloc}/options.cpp ${FLAGS} -o ${vloc}/main_meth_probit.exe
 ```
-module load gcc openmpi boost
 
-vloc={Path to mVAMP/src folder}
+For debugging, add `-g -D_GLIBCXX_DEBUG`. This turns on bounds-checked standard containers,
+which makes runs much slower.
 
-mpic++ ${vloc}/main_meth.cpp ${vloc}/vamp.cpp ${vloc}/utilities.cpp ${vloc}/data.cpp ${vloc}/options.cpp -march=native -Ofast -g -fopenmp -lstdc++fs -D_GLIBCXX_DEBUG -o  ${vloc}/main_meth.exe
+## Input data
+
+| File | Format |
+| --- | --- |
+| Methylation data (`--meth-file`) | Binary file of 8-byte doubles, stored marker by marker: `M` blocks, each with the `N` values of one marker (one per individual). Markers are standardised internally. |
+| Outcome (`--phen-file`) | Text file in PLINK phenotype format, one row per individual, no header: `FID IID value`. No missing values (`NA`) are allowed. For the linear model the outcome is scaled to unit variance but **not centred**, so centre it beforehand. For the probit model use values `0`/`1`. |
+| Covariates (`--cov-file`, probit model only) | Space-separated text file with one header row, then one row per individual: `FID IID cov_1 ... cov_C`. Covariates are standardised internally. |
+| True effects (`--true-signal-file`, optional) | Binary file of `M` 8-byte doubles. Only used to report accuracy metrics in simulations. |
+
+## Example
+
+### 1. Simulate data
+
+```bash
+python3 simulation/data_sim.py --out-dir data/ --N 1000 --M 2000
 ```
 
-## Running mVAMP
-### Inference
-Minimal setup of input options that has to be specified for inference mode is following:
+This writes `data/example.bin` (methylation matrix), `data/example.phen` (outcome) and
+`data/example_ts.bin` (true effects).
 
-```
-export OMP_NUM_THREADS={Number of OpenMP threads}
+To simulate an outcome on top of real methylation data stored as one zarr file per chromosome,
+with a train/test split, use `simulation/sim_top_iid.py`.
 
-mpirun -np {Number of MPI ranks} ${vloc}/main_meth.exe \                      
-                                --meth-file example.bin \
-                                --phen-file example.phen \
-                                --N 1000 \
-                                --Mt 2000 \
-                                --out-dir output/ \
-                                --out-name example \
+### 2. Inference
+
+```bash
+export OMP_NUM_THREADS={number of OpenMP threads}
+
+mpirun -np {number of MPI ranks} ${vloc}/main_meth.exe \
+    --meth-file data/example.bin \
+    --phen-file data/example.phen \
+    --N 1000 \
+    --Mt 2000 \
+    --out-dir output/ \
+    --out-name example
 ```
+
+Add `--true-signal-file data/example_ts.bin` to also get the correlation between the estimated and
+true effects in `example_metrics.csv`.
 
 Output files:
 
-- ``example_params.csv`` table containing the model's hyper-parameters over iterations. Column names: iteration, alpha1, gam1, alpha2, gam2, gamw.
+| File | Content |
+| --- | --- |
+| `example_params.csv` | Hyperparameters per iteration: `iteration, alpha1, gam1, alpha2, gam2, gamw` |
+| `example_metrics.csv` | Metrics per iteration: `iteration`, R² and correlation with the true effects for the denoising step, the same for the LMMSE step, then squared correlation between predicted and observed outcome for both steps |
+| `example_prior.csv` | Learned mixture probabilities and variances. Rows are written only by the probit model; the linear model prints them to standard output instead. |
+| `example_it_{k}.bin` | Effect estimates (`x1_hat`, denoising step) after iteration `k`, `M` 8-byte doubles |
+| `example_r1_it_{k}.bin` | Noisy effect estimates `r1` after iteration `k`, used for state evolution p-values |
 
-- ``example_metrics.csv`` table containing performace metrics over iterations. Column names: iteration, R2_denoising, Corr(xhat1,x0), R2_lmmse, Corr(xhat2,x0), Corr(yhat1,y)^2, Corr(yhat2,y)^2.
+The CSV files are written by MPI at fixed offsets and can contain NUL padding bytes. The scripts in
+`scripts/` strip these when reading.
 
-- ``example_prior.csv`` table containing the prior parameters over iterations. Column names: iteration, number of mix. components L, L * prior probabilities, L * prior variances
+### 3. Out-of-sample testing
 
-- ``example_it_{iteration}.bin`` binary files containing signal estimates from denoising step xhat1 in current iteration. 8 byte DOUBLE precision values.
+Evaluates the estimates from a range of iterations on a test set. Pass any one of the
+`_it_{k}.bin` files as `--estimate-file`; the iteration number in its name is replaced by each
+value in `--test-iter-range`. The path must contain no other `.` than the one before the
+extension (so use `output/`, not `./output/`). The test files can come from, for example, the
+train/test split made by `simulation/sim_top_iid.py`.
 
-- ``example_r1_it_{iteration}.bin`` binary files containing noise corrupted signal estimates from denoising step r1 in current iteration. 8 byte DOUBLE precision values.
-
-### Testing
-If test subset is available, running mVAMP for out-of-sample testing requires at least:
-
-```
-export OMP_NUM_THREADS={Number of OpenMP threads}
-
-mpirun -np {Number of MPI ranks} ${vloc}/main_meth.exe \                      
-                                --meth-file-test example.bin \
-                                --phen-file-test example.phen \
-                                --N-test 1000 \
-                                --Mt 2000 \
-                                --out-dir output/ \
-                                --out-name example \
-                                --estimate-file example_it_1.bin \
-                                --run-mode test \
-```
-Output file:
-
-- ``example_test.csv`` table containing out-of-sample metrics over iterations. Column names: iteration, R2 test, Corr(yhat,y)^2
-
-### Association testing
-mVAMP framework allows to test statistical significance of marker associations. Currently supported pval methods (--pval-method) are state evolution (se) or leave one out (loo) testing. State evolution p value testing example: 
-```
-export OMP_NUM_THREADS={Number of OpenMP threads}
-
-mpirun -np {Number of MPI ranks} ${vloc}/main_meth.exe \                      
-                                --meth-file-test example.bin \
-                                --phen-file-test example.phen \
-                                --N 1000 \
-                                --Mt 2000 \
-                                --out-dir output/ \
-                                --out-name example \
-                                --r1-file example_r1_it_{iteration}.bin \
-                                --gam1 {gam1 value from iteration} \
-                                --run-mode association_test \
-                                --pval-method se \
+```bash
+mpirun -np {number of MPI ranks} ${vloc}/main_meth.exe \
+    --run-mode test \
+    --meth-file-test data/example_test.bin \
+    --phen-file-test data/example_test.phen \
+    --N-test 1000 \
+    --Mt 2000 \
+    --estimate-file output/example_it_1.bin \
+    --test-iter-range 1,10 \
+    --out-dir output/ \
+    --out-name example
 ```
 
-Output file:
-- ``example_it_{iteration}_pval_se.bin`` binary file containing p values from state evlolution. 8 byte DOUBLE precision values.
+Output: `example_test.csv` with `iteration`, test R² and squared correlation between predicted and
+observed outcome.
 
-Leave one out (loo) p value testing example: 
+### 4. Association testing
+
+State evolution p-values, from the `r1` vector of iteration `k` and that iteration's `gam1` (from
+`example_params.csv`):
+
+```bash
+mpirun -np {number of MPI ranks} ${vloc}/main_meth.exe \
+    --run-mode association_test \
+    --pval-method se \
+    --meth-file data/example.bin \
+    --phen-file data/example.phen \
+    --N 1000 \
+    --Mt 2000 \
+    --r1-file output/example_r1_it_{k}.bin \
+    --gam1 {gam1 from iteration k} \
+    --out-dir output/ \
+    --out-name example
 ```
-export OMP_NUM_THREADS={Number of OpenMP threads}
 
-mpirun -np {Number of MPI ranks} ${vloc}/main_meth.exe \                      
-                                --meth-file-test example.bin \
-                                --phen-file-test example.phen \
-                                --N 1000 \
-                                --Mt 2000 \
-                                --out-dir output/ \
-                                --out-name example \
-                                --estimate-file example_it_{iteration}.bin \
-                                --run-mode association_test \
-                                --pval-method loo \
+Output: `example_it_{k}_pval_se.bin`, `M` 8-byte doubles.
+
+Leave-one-out p-values, from the effect estimates of iteration `k`:
+
+```bash
+mpirun -np {number of MPI ranks} ${vloc}/main_meth.exe \
+    --run-mode association_test \
+    --pval-method loo \
+    --meth-file data/example.bin \
+    --phen-file data/example.phen \
+    --N 1000 \
+    --Mt 2000 \
+    --estimate-file output/example_it_{k}.bin \
+    --out-dir output/ \
+    --out-name example
 ```
 
-Output file:
-- ``example_it_{iteration}_pval_loo.bin`` binary file containing p values from leave one out testing. 8 byte DOUBLE precision values.
+Output: `example_it_{k}_pval_loo.bin`, `M` 8-byte doubles.
 
-Eventully, state evolution p value testing can be done using python script ``scripts/p_vals.py``. Example:
-```
-python3 p_vals.py   --out-name example \
-                    --csv-params example_params.csv \
-                    --r1-file example_r1_it_{iteration}.bin \
-                    --it {iteration} \
-                    --th 0.05 \
-                    --M 2000 \
-                    --N 1000 \
-```
-Output file:
-- ``example_it_{iteration}_pval.bin`` binary file containing p values for each marker position in current iteration. 8 byte DOUBLE precision values.
+### Binary outcomes (probit model)
 
-# Input options
+Use `main_meth_probit.exe` with `--model bin_class` and a 0/1 outcome. Covariates can be given with
+`--cov-file` and `--C`. Run modes:
+
+- `infere`: inference, with the same output files as above. The metrics file holds the confusion
+  matrix (TP, TN, FP, FN), accuracy and correlation with the true effects, for both steps.
+- `test`: confusion matrix and accuracy on a test set for a range of iterations, written to
+  `{out-name}_test.csv`.
+- `predict`: writes the linear predictor for the test set, computed from `--estimate-file`, to a
+  `.yhat` text file next to the estimate file.
+
+## Command-line options
 
 | Option | Description | Default |
 | --- | --- | --- |
-| `--run-mode` | `infere` / `test` / `association_test` | `infere` |
-| `--model` | Regression model `linear` / `bin_class` | `linear` |
-| `--pval_method` | Method used for calculating P values in association testing `se` (State Evolution) / `loo` (Leave-One-Out) | `se` |
-| `--meth-file` | Path to .bin file including the data in binary format | |
-| `--meth-file-test` | Path to .bin file for testing | |
-| `--phen-file` | Path to file containing phenotype data | |
-| `--phen-file-test` | Path to phenotype file for testing | |
-| `--cov-file` | Path to .cov file including covariates | |
-| `--cov-file-test` | Path to .cov file including covariates for testing | |
-| `--estimate-file` | Path to file including signal estimates for testing | |
-| `--r1-file` | Path to file including r1 vector - noised version of signal estimates | |
+| `--run-mode` | `infere`, `test` or `association_test` (`main_meth.exe`); `infere`, `test` or `predict` (`main_meth_probit.exe`) | `infere` |
+| `--model` | `linear` or `bin_class` (probit) | `linear` |
+| `--meth-file` | Methylation data for inference | |
+| `--phen-file` | Outcome for inference | |
+| `--meth-file-test` | Methylation data for testing | |
+| `--phen-file-test` | Outcome for testing | |
+| `--cov-file` | Covariates (probit model only) | |
+| `--C` | Number of covariates | 0 |
 | `--N` | Number of individuals for inference | |
 | `--N-test` | Number of individuals for testing | |
-| `--Mt` | Total number of markers for inference | |
-| `--C` | Indicates the number of covariates | |
-| `--out-dir` | Output directory for the signal estimates | |
-| `--out-name` | Name of the output file | |
-| `--iterations` | Maximal number of iterations | 10 |
-| `--test-iter-range` | Iteration range for testing | 1,10 |
+| `--Mt` | Total number of markers | |
+| `--out-dir` | Output directory | |
+| `--out-name` | Prefix for output files | |
+| `--true-signal-file` | True effects, for simulations | |
+| `--estimate-file` | Effect estimates for testing and leave-one-out p-values | |
+| `--r1-file` | `r1` vector for state evolution p-values | |
+| `--pval-method` | `se` (state evolution) or `loo` (leave-one-out) | `se` |
+| `--iterations` | Maximum number of VAMP iterations | 50 |
+| `--test-iter-range` | First and last iteration to evaluate in `test` mode | `1,50` |
+| `--stop-criteria-thr` | Stop when the relative change of the estimates falls below this | 0.01 |
 | `--rho` | Damping factor | 0.5 |
-| `--gam1` | Signal noise precision. Used for initialization when ``infer`` mode, used for p value calculation when ``association_test`` mode | 1e-6 |
-| `--h2` | Heritability value used in simulations | 0.5 |
-| `--true_signal_file` | Path to binary file containing true signals | |
-| `--num-mix-comp` | Nnumber of gaussian mixture components | 2 |
-| `--probs` | Initial prior mixture coefficients (separated by comma, must sum up to 1) | 0.5,0.5 |
-| `--vars` | Initial prior variances (separated by comma) | 0.0,0.001|
-| `--learn-vars` | Indicates whether or not prior variances are learned | 0 |
-| `--CG-max-iter` | Maximal number of iteration used in conjugate gradient method | 500 |
-| `--EM-err-thr` | Relative error threshold within expectation maximization | 1e-2 |
-| `--EM-max-iter` | Maximal number of iterations of expectation maximization | 1 |
-| `--stop-criteria-thr` | Relative error threshold within expectation maximization | 0 |
-| `--verbosity` | Whether or not to print out details | 0 |
+| `--h2` | Initial heritability; sets the initial noise precision to `1 / (1 - h2)` | 0.5 |
+| `--gam1` | Initial signal noise precision; in `association_test` mode with `se`, the `gam1` of the chosen iteration | 1e-6 |
+| `--probs` | Initial mixture probabilities, comma-separated, summing to 1. The first component is the spike at zero. | 10 components |
+| `--vars` | Initial mixture variances, comma-separated, same length as `--probs`. The first should be 0. | 10 components |
+| `--learn-vars` | Learn the mixture variances (1) or keep them fixed (0) | 1 |
+| `--learn-prior-delay` | Start learning the prior after this many iterations | 1 |
+| `--EM-max-iter` | Maximum EM iterations per prior update | 1 |
+| `--EM-err-thr` | Relative error threshold for EM | 0.01 |
+| `--merge-vars-thr` | Merge mixture components whose variances differ by less than this relative amount | 0.5 |
+| `--CG-max-iter` | Maximum conjugate gradient iterations | 500 |
+| `--CG-err-tol` | Relative error tolerance for conjugate gradient | 1e-5 |
+| `--alpha-scale` | Markers are scaled by `1 / sd^alpha-scale` | 1 |
+| `--verbosity` | Print details of the EM and CG iterations (1) | 0 |
 
+The defaults for `--probs` and `--vars` are a 10-component mixture with variances
+`0, 1e-6, 6e-6, 3e-5, 2e-4, 1e-3, 6e-3, 3e-2, 0.2, 1`. The spike gets probability 0.99, and the
+remaining 0.01 is spread over the other components, halving from one component to the next.
 
-# Initialization from Gibbs sampler
-Efficient implementation of Gibbs sampler for multi-omics data, GMRMomi, can be used for initializing mVAMP algorithm using very first samples from MCMC posterior trace.
+## Post-processing scripts
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/p_vals.py` | State evolution p-values computed in Python from an `r1` file and `_params.csv` (same as `--pval-method se`) |
+| `scripts/metrics.py` | Plots R² (train and test), `gamw` and `gam1` over iterations, and prints a summary table |
+| `scripts/manhattan.py` | Manhattan plot of p-values; needs per-chromosome probe lists |
+| `scripts/roc.py` | ROC curve, AUC, FDR and TPR of p-values against known true effects (simulations) |
+| `scripts/r2.py` | R² between predicted and observed outcome |
 
 Example:
-1. Run GMRMomi, as in https://github.com/medical-genomics-group/gmrm-omi
-2. Run ``conf_gibbs_init.py`` to create .conf configuration file for mVAMP initialization.
-```
-python3 conf_gibbs_init.py  --csv example.csv \
-                            --grm example.grm \
-                            --out-dir output/directory/ \
-                            --iterations 100:200 \
-                            --rho 0.5
-```
-3. Access the configuration and run mVAMP
-```
-# If more than one configuration in the file, use different IDs
-id=0
 
-# Configuration file path
-conf=example.conf
-
-# Accessing the values in .conf file
-rho=$(awk -v ID=$id '$1==ID {print $2}' $conf)
-L=$(awk -v ID=$id '$1==ID {print $3}' $conf)
-probs=$(awk -v ID=$id '$1==ID {print $5}' $conf)
-vars=$(awk -v ID=$id '$1==ID {print $6}' $conf)
-h2=$(awk -v ID=$id '$1==ID {print $7}' $conf)
-
-# Running mVAMP
-export OMP_NUM_THREADS={Number of OpenMP threads}
-
-mpirun -np {Number of MPI ranks} ${vloc}/main_meth.exe \                      
-                                --meth-file example.bin \
-                                --phen-file example.phen \
-                                --N 1000 \
-                                --Mt 2000 \
-                                --out-dir output/ \
-                                --out-name example \
-                                --num-mix-comp $L \
-                                --probs $probs \
-                                --vars $vars \
-                                --rho $rho \
-                                --h2 $h2
+```bash
+python3 scripts/p_vals.py --out-name example_it_{k}_pval \
+                          --csv-params output/example_params.csv \
+                          --r1-file output/example_r1_it_{k}.bin \
+                          --it {k} \
+                          --M 2000 \
+                          --N 1000
 ```
+
+This writes `output/example_it_{k}_pval.bin` and prints how many markers pass the Bonferroni
+threshold `--th / M` (default `--th 0.05`).
