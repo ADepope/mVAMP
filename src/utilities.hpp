@@ -1,12 +1,13 @@
 #pragma once
-#include <assert.h>
+#include <cassert>
 #include <cmath>
 #include <immintrin.h>
+#include <mpi.h>
+#include <string>
 #include <vector>
 #include <fstream>
-#include <cstdlib>  // contains definition of srand()
+#include <cstdlib>
 #include <random>
-
 
 void check_malloc(const void* ptr, const int linenumber, const char* filename);
 
@@ -79,22 +80,20 @@ void mpi_file_read_at_all(const size_t N, const MPI_Offset offset, const MPI_Fil
     int SPLIT_ON = check_int_overflow(size_t(ceil(double(N)/double(NREADS))), __LINE__, __FILE__);
     int count = SPLIT_ON;
     bytes = 0;
-        
+
     MPI_Status status;
     for (uint i=0; i<NREADS; ++i) {
-            
+
         const size_t iim = size_t(i) * size_t(SPLIT_ON);
 
         // Last iteration takes only the leftover
         if (i == NREADS-1) count = check_int_overflow(N - iim, __LINE__, __FILE__);
 
-        //MPI_File_read_at(fh, offset + iim * size_t(dtsize), &buffer[iim], count, MPI_DT, &status);
         check_mpi(MPI_File_read_at(fh, offset + iim * size_t(dtsize), &buffer[iim], count, MPI_DT, &status), __LINE__, __FILE__);
 
         bytes += size_t(count) * size_t(dtsize);
     }
 }
-
 
 // MPI_File_write_at_all handling count argument larger than INT_MAX
 //
@@ -107,13 +106,12 @@ void mpi_file_write_at_all(const size_t N, MPI_Offset offset, MPI_File fh, MPI_D
     MPI_Type_size(MPI_DT, &dtsize);
     assert(dtsize == sizeof(buffer[0]));
 
-
     int SPLIT_ON = check_int_overflow(size_t(ceil(double(N)/double(NWRITES))), __LINE__, __FILE__);
     int count = SPLIT_ON;
 
     MPI_Status status;
     for (uint i=0; i<NWRITES; ++i) {
-        
+
         const size_t iim = size_t(i) * size_t(SPLIT_ON);
 
         // Last iteration takes only the leftover

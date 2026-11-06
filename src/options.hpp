@@ -5,7 +5,7 @@
 class Options {
 
 public:
-    Options() = default; // the compiler automatically generates the default constructor if it does not declare its own
+    Options() = default;
     Options(int argc, char** argv) {
         read_command_line_options(argc, argv);
         check_options();
@@ -55,7 +55,7 @@ public:
     int  get_verbosity() const { return verbosity; }
     unsigned int get_iterations() const { return iterations; }
 
-    std::vector<double> get_vars() const { return vars; } 
+    std::vector<double> get_vars() const { return vars; }
     std::vector<double> get_probs() const { return probs; }
     std::vector<int> get_test_iter_range() const { return test_iter_range; }
 
@@ -89,7 +89,7 @@ private:
     unsigned int num_mix_comp = 10;
     unsigned int learn_vars = 1;
     unsigned int learn_prior_delay = 1;
-    double alpha_scale = 1.0; 
+    double alpha_scale = 1.0;
     unsigned int redglob = 0;
     unsigned int C = 0;
     double probit_var = 1;

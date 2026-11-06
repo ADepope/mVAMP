@@ -30,9 +30,8 @@ int main(int argc, char** argv)
 
     // Divide work for parallel ranks
     std::vector<double> MS = divide_work(Mt);
-    int M = MS[0]; // Numbe of markers for current rank
-    int S = MS[1]; // Offset of part of markers processed by current rank 
-    int Mm = MS[2]; // Index of marker max
+    int M = MS[0]; // Number of markers for current rank
+    int S = MS[1]; // Offset of part of markers processed by current rank
 
     // Infer model parameters and calculate test R2
     if (opt.get_run_mode() == "infere"){
@@ -53,7 +52,7 @@ int main(int argc, char** argv)
         double h2 = opt.get_h2(); // heritability
         double gamw = 1.0 / (1.0 - h2); // Noise precision
         double gam1 = opt.get_gam1(); // Signal noise precision
-        
+
         int max_iter = opt.get_iterations();
         int learn_vars = opt.get_learn_vars();
         int learn_prior_delay = opt.get_learn_prior_delay();
@@ -76,13 +75,13 @@ int main(int argc, char** argv)
             true_signal = std::vector<double> (M, 0.0);
 
         // ---------------- running VAMP algorithm -------------------- //
-        vamp emvamp(N, 
+        vamp emvamp(N,
                     M,
                     Mt,
                     C,
                     gam1,
                     gamw,
-                    max_iter, 
+                    max_iter,
                     CG_max_iter,
                     CG_err_tol,
                     EM_max_iter,
@@ -101,10 +100,11 @@ int main(int argc, char** argv)
                     model,
                     verbosity,
                     rank); // Create VAMP instance
-        
+
         std::vector<double> x_est = emvamp.infere(&dataset); // Infer model parameters
 
-    } else if (opt.get_run_mode() == "test") // just analyzing the result on the test data
+    }
+    else if (opt.get_run_mode() == "test") // just analyzing the result on the test data
     {
         // Setup out csv file
         std::string outcsv_fp = out_dir + "/" + out_name + "_test.csv";
@@ -116,7 +116,7 @@ int main(int argc, char** argv)
                 MPI_INFO_NULL,
                 &outcsv_fh),
                 __LINE__, __FILE__);
-       
+
         // reading test set
         const std::string mrkfp_test = opt.get_meth_file_test();
         const std::string pheno_test = opt.get_phen_file_test(); // currently it is only supported passing one pheno files as an input argument
@@ -126,7 +126,7 @@ int main(int argc, char** argv)
         double alpha_scale = opt.get_alpha_scale();
 
         data dataset_test(pheno_test, mrkfp_test, model, N_test, M, Mt, S, rank, alpha_scale);
-        
+
         std::vector<double> y = dataset_test.get_phen();
 
         // parse estimate file name
@@ -158,7 +158,7 @@ int main(int argc, char** argv)
             // normalization of estimates
             for (int i0 = 0; i0 < x_est.size(); i0++)
                 x_est[i0] *= sqrt( (double) N_test );
-                
+
             // Predictions
             std::vector<double> z_test = dataset_test.Ax(x_est.data());
             std::vector<double> yhat(N_test,0);
@@ -166,11 +166,9 @@ int main(int argc, char** argv)
                 double prob = normal_cdf(z_test[i]);
                 if (prob >= 0.5)
                     yhat[i] = 1;
-                else 
+                else
                     yhat[i] = 0;
             }
-            //std::string pred_file_name = est_file_name.substr(0, pos_it) + "it_" + std::to_string(it) + ".yhat";
-            //store_vec_to_file(pred_file_name, yhat.data());
 
             int TP=0, TN=0, FP=0, FN=0;
             for (int i = 0; i < N_test; i++){
@@ -184,7 +182,7 @@ int main(int argc, char** argv)
                     FP++;
             }
             double ACC = (double)(TP + TN ) / (double)(TP + TN + FP + FN);
-            
+
             params[0] = TP;
             params[1] = TN;
             params[2] = FP;
@@ -201,34 +199,35 @@ int main(int argc, char** argv)
                 write_ofile_csv(outcsv_fh, it, &params);
             }
         }
-      }  else if (opt.get_run_mode() == "predict") // just analyzing the result on the test data
+    }
+    else if (opt.get_run_mode() == "predict") // store linear predictor A * x_est for the test data
     {
-
-                // reading test set
+        // reading test set
         const std::string mrkfp_test = opt.get_meth_file_test();
         const std::string pheno_test = opt.get_phen_file_test(); // currently it is only supported passing one pheno files as an input argument
         std::string est_file_name = opt.get_estimate_file();
         int pos_it = est_file_name.rfind("it");
         std::string pred_file_name = est_file_name.substr(0, pos_it) + ".yhat";
-        
+
         size_t N_test = opt.get_N_test();
         double alpha_scale = opt.get_alpha_scale();
 
         data dataset_test(pheno_test, mrkfp_test, model, N_test, M, Mt, S, rank, alpha_scale);
-        
+
         std::vector<double> x_est = mpi_read_vec_from_file(est_file_name, M, S);
 
         // normalization of estimates
         for (int i0 = 0; i0 < x_est.size(); i0++)
             x_est[i0] *= sqrt( (double) N_test );
-                
+
         // Predictions
         std::vector<double> z_hat = dataset_test.Ax(x_est.data());
-    
+
         store_vec_to_file(pred_file_name, z_hat);
-
     }
-
+    else if (rank == 0) {
+        std::cout << "FATAL: unknown --run-mode \"" << opt.get_run_mode() << "\" (use infere, test or predict)" << std::endl;
+    }
 
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();

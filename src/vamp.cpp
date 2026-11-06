@@ -8,19 +8,19 @@
 #include <omp.h>
 #include <fstream>
 #include <cfloat>
+#include <cstring>
 #include "vamp.hpp"
 #include "data.hpp"
-#include "vamp_probit.cpp"
 #include "utilities.hpp"
-#include <cstring>
+#include "vamp_probit.cpp" // probit (bin_class) model; compiled as part of this file
 
-// VAMP constructor 
+// VAMP constructor
 vamp::vamp( int N,
             int M,
-            int Mt, 
-            int C, 
-            double gam1, 
-            double gamw, 
+            int Mt,
+            int C,
+            double gam1,
+            double gamw,
             int max_iter,
             int CG_max_iter,
             double CG_err_tol,
@@ -32,11 +32,11 @@ vamp::vamp( int N,
             double stop_criteria_thr,
             double merge_vars_thr,
             std::vector<double> vars,
-            std::vector<double> probs, 
+            std::vector<double> probs,
             std::vector<double> true_signal,
             std::vector<double> x1hat_init,
-            std::string out_dir, 
-            std::string out_name, 
+            std::string out_dir,
+            std::string out_name,
             std::string model,
             int verbosity,
             int rank):
@@ -45,56 +45,48 @@ vamp::vamp( int N,
             M(M),
             Mt(Mt),
             C(C),
-            gam1(gam1),
-            gamw(gamw),
             max_iter(max_iter),
-            CG_max_iter(CG_max_iter),
-            CG_err_tol(CG_err_tol),
+            rank(rank),
+            gam1(gam1),
+            rho(rho),
+            gamw(gamw),
+            true_signal(true_signal),
+            x1hat_init(x1hat_init),
+            probs(probs),
+            vars(vars),
             EM_max_iter(EM_max_iter),
             EM_err_thr(EM_err_thr),
-            rho(rho),
+            CG_max_iter(CG_max_iter),
+            CG_err_tol(CG_err_tol),
             learn_vars(learn_vars),
             learn_prior_delay(learn_prior_delay),
             stop_criteria_thr(stop_criteria_thr),
             merge_vars_thr(merge_vars_thr),
-            vars(vars),
-            probs(probs),
-            true_signal(true_signal),
-            x1hat_init(x1hat_init),
+            model(model),
             out_dir(out_dir),
             out_name(out_name),
-            model(model),
-            verbosity(verbosity),
-            rank(rank){
+            verbosity(verbosity) {
 
-                x1_hat = std::vector<double> (M, 0.0);
-                //for (int i0=0; i0<x1_hat.size(); i0++)
-                //    x1_hat[i0] =  x1hat_init[i0] / sqrt(N);
-                
-                x2_hat = std::vector<double> (M, 0.0);
-                
-                //r1 = simulate(M, std::vector<double> {1.0 / gam1}, std::vector<double> {1});
-                r1 = std::vector<double> (M, 0.0);
-                //for (int i0=0; i0<x1_hat.size(); i0++)
-                //    r1[i0] =  x1hat_init[i0] / sqrt(N);
-                
-                r2 = std::vector<double> (M, 0.0);
-                p1 = std::vector<double> (N, 0.0);
-    
-                MPI_Comm_size(MPI_COMM_WORLD, &nranks);
+    x1_hat = std::vector<double> (M, 0.0);
+    x2_hat = std::vector<double> (M, 0.0);
+    r1 = std::vector<double> (M, 0.0);
+    r2 = std::vector<double> (M, 0.0);
+    p1 = std::vector<double> (N, 0.0);
 
-                // we scale mixture variances of effects by N (since the design matrix is scaled by 1/sqrt(N))
-                for (int i = 0; i < vars.size(); i++)
-                    this->vars[i] *= N;
+    MPI_Comm_size(MPI_COMM_WORLD, &nranks);
 
-                setup_io();
+    // we scale mixture variances of effects by N (since the design matrix is scaled by 1/sqrt(N))
+    for (int i = 0; i < vars.size(); i++)
+        this->vars[i] *= N;
+
+    setup_io();
 }
 
 // --------------- VAMP - MAIN INFERENCE PROCEDURE ----------------
 std::vector<double> vamp::infere( data* dataset ){
 
     y = (*dataset).get_phen(); // True outcome
-    
+
     // deciding between linear regression and probit regression
     if (!strcmp(model.c_str(), "linear"))
         return infere_linear(dataset);
@@ -102,16 +94,14 @@ std::vector<double> vamp::infere( data* dataset ){
         return infere_bin_class(dataset);
     else
         throw "Invalid model specification!";
-
-    return std::vector<double> (M, 0.0);
 }
 
-// ------------ VAMP linear model ------------- 
+// ------------ VAMP linear model -------------
 std::vector<double> vamp::infere_linear(data* dataset){
 
     std::vector<double> metrics(6,0); // Error metrics from denoising and lmmse steps to save to csv [R2_den, x1_corr_den | R2_lmmse, x2_corr_lmmse | corr_y_2_den, corr_y_2_lmmse]
     std::vector<double> params(5,0); // Parameters from denoising and lmmse steps to save to csv [alpha1 | gam1 | alpha2 | gam2 | gamw ]
-       
+
     for(int i=0; i < probs.size(); i++)
         prior_header.push_back("prob" + std::to_string(i));
     for(int i=0; i < vars.size(); i++)
@@ -123,10 +113,8 @@ std::vector<double> vamp::infere_linear(data* dataset){
     }
 
     std::vector<double> x1_hat_d(M, 0.0);
-    std::vector<double> x1_hat_d_prev(M, 0.0);
     std::vector<double> x1_hat_scaled(M, 0.0);
     std::vector<double> x1_hat_prev(M, 0.0);
-    std::vector<double> x2_hat_prev(M, 0.0);
 
     std::vector<double> y =  (*dataset).get_phen();
 
@@ -146,10 +134,10 @@ std::vector<double> vamp::infere_linear(data* dataset){
 
     // ---------------- starting VAMP iterations ----------------
     for (int it = 1; it <= max_iter; it++)
-    {    
+    {
         if (rank == 0)
             std::cout << std::endl << "********************" << std::endl << "iteration = "<< it << std::endl << "********************" << std::endl;
-        
+
         // --------------- Covariate effects -----------------
         double start_covar = MPI_Wtime(); // measure time for covariates
         if (it == 1 && C > 0){
@@ -185,14 +173,14 @@ std::vector<double> vamp::infere_linear(data* dataset){
 
         if (it > learn_prior_delay)
             updatePrior();
-        
+
         // prior distribution parameters
         if (rank == 0){
             std::cout << "Prior variances = ";
             for (int i = 0; i < vars.size(); i++)
                 std::cout << vars[i] / (double) N << ' ';
             std::cout << std::endl;
-    
+
             std::cout << "Prior probabilities = ";
             for (int i = 0; i < probs.size(); i++)
                 std::cout << probs[i] << ' ';
@@ -204,8 +192,8 @@ std::vector<double> vamp::infere_linear(data* dataset){
         for (int i = 0; i < M; i++)
             x1_hat[i] = g1(r1[i], gam1);
 
-        // damping 
-        if (it > 1){ 
+        // damping
+        if (it > 1){
             for (int i = 0; i < M; i++)
                 x1_hat[i] = rho * x1_hat[i] + (1-rho) * x1_hat_prev[i];
         }
@@ -222,13 +210,8 @@ std::vector<double> vamp::infere_linear(data* dataset){
         MPI_Allreduce(&sum_d, &alpha1, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         alpha1 /= Mt;
 
-        // Damping alpha1
-        //if(it > 1){
-        //    alpha1 = 1.0 + pow(1000.0, -alpha1);
-        //}
-
         eta1 = gam1 / alpha1;
-        
+
         z1 = (*dataset).Ax(x1_hat.data());
 
         // saving x1_hat
@@ -251,10 +234,8 @@ std::vector<double> vamp::infere_linear(data* dataset){
         if (rank == 0)
            std::cout << "r1_hat filepath_out is " << filepath_out_r1 << std::endl;
 
-        double gam2_prev = gam2;
         gam2 = eta1 - gam1;
         gam2 = std::min(std::max(gam2, gamma_min), gamma_max);
-        //gam2 = rho * gam2; // damping
 
         for (int i = 0; i < M; i++){
             r2[i] = (eta1 * x1_hat[i] - gam1 * r1[i]) / gam2;
@@ -314,14 +295,6 @@ std::vector<double> vamp::infere_linear(data* dataset){
 
         if (rank == 0)
             std::cout << "CG took "  << end_CG - start_CG << " seconds." << std::endl;
- 
-        // Damping x2_hat
-
-        //if(it > 1){
-        //    for (int i = 0; i < M; i++){
-        //        x2_hat[i] = rho * x2_hat[i] + (1-rho) * x2_hat_prev[i];
-        //    }
-        //}
 
         double start_onsager = MPI_Wtime();
 
@@ -331,13 +304,7 @@ std::vector<double> vamp::infere_linear(data* dataset){
 
         if (rank == 0)
             std::cout << "onsager took "  << end_onsager - start_onsager << " seconds." << std::endl;
-        
-        // Damping alpha2
 
-        //if(it > 1){
-        //    alpha2 = rho * alpha2 + (1-rho) * alpha2_prev;
-        //}
-        
         eta2 = gam2 / alpha2;
 
         double gam1_prev = gam1;
@@ -360,7 +327,7 @@ std::vector<double> vamp::infere_linear(data* dataset){
 
         // learning a noise precision parameter
         updateNoisePrec(dataset);
-   
+
         // printing out error measures
         err_measures(dataset, 2, metrics);
 
@@ -389,9 +356,10 @@ std::vector<double> vamp::infere_linear(data* dataset){
             std::cout << "...storing parameters to CSV files" << std::endl;
             write_ofile_csv(out_params_fh, it, &params);
             write_ofile_csv(out_metrics_fh, it, &metrics);
-            //write_ofile_csv(out_prior_fh, it, &prior_params);
+            // Writing rows to _prior.csv is disabled for the linear model: rows can change
+            // length when mixture components merge, while write_ofile_csv assumes fixed-length rows.
         }
-        
+
         double end_lmmse_step = MPI_Wtime();
         total_comp_time += end_denoising - start_denoising + end_lmmse_step - start_lmmse_step;
 
@@ -399,7 +367,6 @@ std::vector<double> vamp::infere_linear(data* dataset){
             std::cout << "LMMSE step took "  << end_lmmse_step - start_lmmse_step << " seconds." << std::endl;
             std::cout << "Total iteration time = " << end_denoising - start_denoising + end_lmmse_step - start_lmmse_step << std::endl;
             std::cout << "Total computation time so far = " << total_comp_time << std::endl;
-            //std::cout << std::endl << std::endl;
         }
 
         // Stopping criteria
@@ -434,11 +401,11 @@ std::vector<double> vamp::infere_linear(data* dataset){
     MPI_Barrier(MPI_COMM_WORLD);
 
     // returning scaled version of the effects
-    return x1_hat_scaled;          
+    return x1_hat_scaled;
 }
 
-double vamp::g1(double y, double gam1) { 
-    
+double vamp::g1(double y, double gam1) {
+
     double sigma = 1 / gam1;
     double eta_max = *(std::max_element(vars.begin(), vars.end()));
     double pk = 0, pkd = 0, val;
@@ -454,20 +421,20 @@ double vamp::g1(double y, double gam1) {
 
         pk = pk + z;
         z = z / ( vars[i] + sigma ) * y;
-        pkd = pkd - z; 
+        pkd = pkd - z;
     }
 
     val = (y + sigma * pkd / pk);
-    
+
     return val;
 }
 
-double vamp::g1d(double y, double gam1) { 
-    
+double vamp::g1d(double y, double gam1) {
+
         double sigma = 1 / gam1;
         double eta_max = *std::max_element(vars.begin(), vars.end());
         double pk = 0, pkd = 0, pkdd = 0;
-        
+
         if (sigma < 1e-10 && sigma > -1e-10) {
             return 1;
         }
@@ -483,8 +450,8 @@ double vamp::g1d(double y, double gam1) {
 
             double z2 = z / ( vars[i] + sigma ) * y;
             pkdd = pkdd - probs[i] / pow( vars[i] + sigma, 1.5 ) * exp( expe_sum ) + z2;
-            
-        } 
+
+        }
 
         double val = (1 + sigma * ( pkdd / pk - pow( pkd / pk, 2) ) );
 
@@ -497,27 +464,26 @@ double vamp::g2d_onsager(double gam2, double tau, data* dataset) { // shared bet
 
     double onsager = gam2 * inner_prod(bern_vec, invQ_bern_vec, 1); // because we want to calculate gam2 * Tr[(gamw * X^TX + gam2 * I)^(-1)] / Mt
 
-    return onsager;    
+    return onsager;
 }
-
 
 void vamp::updateNoisePrec(data* dataset){
 
-    y = (*dataset).get_phen();  
+    y = (*dataset).get_phen();
 
     std::vector<double> temp = (*dataset).Ax(x2_hat.data());
 
     for (int i = 0; i < N; i++)  // because length(y) = N
         temp[i] -= y[i];
-    
-    double temp_norm2 = l2_norm2(temp, 0); 
-    
+
+    double temp_norm2 = l2_norm2(temp, 0);
+
     std::vector<double> trace_corr_vec_N;
     std::vector<double> trace_corr_vec_M;
 
     trace_corr_vec_N = (*dataset).Ax(invQ_bern_vec.data());
     trace_corr_vec_M = (*dataset).ATx(trace_corr_vec_N.data());
-    
+
     double trace_corr = inner_prod(bern_vec, trace_corr_vec_M, 1) * Mt; // because we took u ~ Bern({-1,1} / sqrt(Mt), 1/2)
 
     if (rank == 0){
@@ -529,14 +495,14 @@ void vamp::updateNoisePrec(data* dataset){
 }
 
 void vamp::updatePrior() {
-    
+
     double noise_var = 1 / gam1;
     double lambda = 1 - probs[0];
 
     std::vector<double> omegas = probs;
     for (int j = 1; j < omegas.size(); j++) // omegas is of length L
         omegas[j] /= lambda;
-                       
+
     // calculating normalized beta and pin
     int it;
 
@@ -551,39 +517,38 @@ void vamp::updatePrior() {
         std::vector<double> pin(M, 0.0);
         std::vector<double> v;
 
-    for (int i = 0; i < M; i++){
+        for (int i = 0; i < M; i++){
             std::vector<double> temp; // of length (L-1)
             std::vector<double> temp_gammas;
             for (int j = 1; j < probs.size(); j++ ){
                 double num = lambda * omegas[j] * exp( - pow(r1[i], 2) / 2 * (max_sigma - vars[j]) / (vars[j] + noise_var) / (max_sigma + noise_var) ) / sqrt(vars[j] + noise_var) / sqrt(2 * M_PI);
-                double num_gammas = gam1 * r1[i] / ( 1 / vars[j] + gam1 );   
+                double num_gammas = gam1 * r1[i] / ( 1 / vars[j] + gam1 );
                 temp.push_back(num);
                 temp_gammas.push_back(num_gammas);
             }
             double sum_of_elems = std::accumulate(temp.begin(), temp.end(), decltype(temp)::value_type(0));
-        
+
             for (int j = 0; j < temp.size(); j++ )
                 temp[j] /= sum_of_elems;
-            
+
             beta.push_back(temp);
             gammas.push_back(temp_gammas);
-            
+
             pin[i] = 1 / ( 1 + (1-lambda) / sqrt(2 * M_PI * noise_var) * exp( - pow(r1[i], 2) / 2 * max_sigma / noise_var / (noise_var + max_sigma) ) / sum_of_elems );
-        } 
+        }
         for (int j = 1; j < probs.size(); j++)
             v.push_back( 1.0 / ( 1.0 / vars[j] + gam1 ) ); // v is of size (L-1) in the end
-        
+
         lambda = accumulate(pin.begin(), pin.end(), 0.0); // / pin.size();
         double lambda_total = 0;
         MPI_Allreduce(&lambda, &lambda_total, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         lambda = lambda_total / Mt;
-    
+
         for (int i = 0; i < M; i++){
             for (int j = 0; j < (beta[0]).size(); j++ ){
                 gammas[i][j] = beta[i][j] * ( gammas[i][j] * gammas[i][j] + v[j] );
             }
         }
-        //double sum_of_pin = std::accumulate(pin.begin(), pin.end(), decltype(pin)::value_type(0));
         double sum_of_pin = lambda_total;
         for (int j = 0; j < (beta[0]).size(); j++){ // of length (L-1)
             double res = 0, res_gammas = 0;
@@ -601,7 +566,7 @@ void vamp::updatePrior() {
             probs[j+1] = lambda * omegas[j+1];
         }
         probs[0] = 1 - lambda;
-    
+
         double distance_probs = 0, norm_probs = 0;
         double distance_vars = 0, norm_vars = 0;
         for (int j = 0; j < probs.size(); j++){
@@ -616,14 +581,14 @@ void vamp::updatePrior() {
             if (rank == 0)
                 std::cout << "it = " << it << ": dist_probs = " << dist_probs << " & dist_vars = " << dist_vars << std::endl;
         if ( dist_probs < EM_err_thr  && dist_vars < EM_err_thr )
-            break;   
+            break;
     }
 
     if (verbosity == 1)
-        if (rank == 0)  
+        if (rank == 0)
             std::cout << "Final number of prior EM iterations = " << std::min(it + 1, EM_max_iter) << " / " << EM_max_iter << std::endl;
 
-    // merging close variances    
+    // merging close variances
     for (int j = 0; j < vars.size(); j++){
         for (int k = j+1; k < vars.size(); k++){
             double denom;
@@ -631,7 +596,7 @@ void vamp::updatePrior() {
                 denom = std::min(vars[j], vars[k]);
             else
                 denom = 1e-7;
-            if ( abs(vars[j] - vars[k]) / denom < merge_vars_thr ){
+            if ( std::abs(vars[j] - vars[k]) / denom < merge_vars_thr ){
                 double sum2probs = probs[j] + probs[k];
                 vars.erase(vars.begin() + k);
                 probs.erase(probs.begin() + k);
@@ -647,11 +612,8 @@ std::vector<double> vamp::lmmse_mult(std::vector<double> v, double tau, data* da
     if (v == std::vector<double>(M, 0.0))
         return std::vector<double>(M, 0.0);
 
-    std::vector<double> res(M, 0.0);
-    size_t phen_size = N;
-    std::vector<double> res_temp(phen_size, 0.0);
-    res_temp = (*dataset).Ax(v.data());
-    res = (*dataset).ATx(res_temp.data());
+    std::vector<double> res_temp = (*dataset).Ax(v.data());
+    std::vector<double> res = (*dataset).ATx(res_temp.data());
 
     for (int i = 0; i < M; i++){
         res[i] *= tau;
@@ -675,7 +637,7 @@ std::vector<double> vamp::precondCG_solver(std::vector<double> v, std::vector<do
 
     for (int j=0; j<M; j++)
         diag[j] = tau * (N-1) / N + gam2;
-         
+
     std::vector<double> mu = mu_start;
     std::vector<double> d;
     std::vector<double> r = lmmse_mult(mu, tau, dataset);
@@ -699,7 +661,7 @@ std::vector<double> vamp::precondCG_solver(std::vector<double> v, std::vector<do
         // d = A*p
         d = lmmse_mult(p, tau, dataset);
         alpha = inner_prod(r, z, 1) / inner_prod(d, p, 1);
-        
+
         for (int j = 0; j < M; j++)
             palpha[j] = alpha * p[j];
 
@@ -711,7 +673,7 @@ std::vector<double> vamp::precondCG_solver(std::vector<double> v, std::vector<do
             double rel_err;
 
             if (onsager != 0)
-                rel_err = abs( (onsager - prev_onsager) / onsager ); 
+                rel_err = std::abs( (onsager - prev_onsager) / onsager );
             else
                 rel_err = 1;
 
@@ -747,7 +709,7 @@ std::vector<double> vamp::precondCG_solver(std::vector<double> v, std::vector<do
         if (rank == 0 && verbosity == 1)
             std::cout << "[CG] it = " << i << ": ||r_it|| / ||RHS|| = " << rel_err << ", ||x_it|| = " << norm_mu << ", ||z|| / ||RHS|| = " << norm_z /  norm_v << std::endl;
 
-        if (rel_err < CG_err_tol) 
+        if (rel_err < CG_err_tol)
             break;
     }
     if (denoiser == 1)
@@ -756,74 +718,57 @@ std::vector<double> vamp::precondCG_solver(std::vector<double> v, std::vector<do
     return mu;
  }
 
-
 void vamp::err_measures(data *dataset, int ind, std::vector<double>& metrics){
 
     double scale = 1.0 / (double) N;
-    
+
     // correlation
     if (ind == 1){
 
         double corr = inner_prod(x1_hat, true_signal, 1) / sqrt( l2_norm2(x1_hat, 1) * l2_norm2(true_signal, 1) );
         metrics[1] = corr;
         if ( rank == 0 )
-            std::cout << "Corr(x1_hat, x0) = " << corr << std::endl;  
-
-        double l2_norm2_x1_hat = l2_norm2(x1_hat, 1);
-        double l2_norm2_true_signal = l2_norm2(true_signal, 1);
-
+            std::cout << "Corr(x1_hat, x0) = " << corr << std::endl;
     }
     else if (ind == 2){
 
         double corr_2 = inner_prod(x2_hat, true_signal, 1) / sqrt( l2_norm2(x2_hat, 1) * l2_norm2(true_signal, 1) );
         metrics[3] = corr_2;
         if (rank == 0)
-            std::cout << "Corr(x2_hat, x0)= " << corr_2 << std::endl;
-
-        double l2_norm2_x2_hat = l2_norm2(x2_hat, 1);
-        double l2_norm2_true_signal = l2_norm2(true_signal, 1);
-        
+            std::cout << "Corr(x2_hat, x0) = " << corr_2 << std::endl;
     }
-    
 
     // l2 signal error
     std::vector<double> temp(M, 0.0);
-    double l2_norm2_xhat;
 
     if (ind == 1){
         for (int i = 0; i< M; i++)
             temp[i] = sqrt(scale) * x1_hat[i] - true_signal[i];
-
-        l2_norm2_xhat = l2_norm2(x1_hat, 1) * scale;
     }
     else if (ind == 2){
         for (int i = 0; i< M; i++)
             temp[i] = sqrt(scale) * x2_hat[i] - true_signal[i];
-
-        l2_norm2_xhat = l2_norm2(x2_hat, 1) * scale;
     }
-
 
     double l2_signal_err = sqrt( l2_norm2(temp, 1) / l2_norm2(true_signal, 1) );
     if (rank == 0)
         std::cout << "L2(x_hat, x0)= " << l2_signal_err << std::endl;
-    
-    
+
     // l2 prediction error
-    size_t phen_size = N;
-    std::vector<double> tempNest(phen_size, 0.0);
-    std::vector<double> tempNtrue(phen_size, 0.0);
+    std::vector<double> tempNest(N, 0.0);
 
     y = (*dataset).get_phen();
 
     std::vector<double> Axest;
-    if (ind == 1)
+    if (ind == 1) {
         if (z1.size() > 0)
             Axest = z1;
         else
             Axest = (*dataset).Ax(x1_hat.data());
-    else if (ind == 2)
-    Axest = (*dataset).Ax(x2_hat.data());
+    }
+    else if (ind == 2) {
+        Axest = (*dataset).Ax(x2_hat.data());
+    }
 
     for (int i = 0; i < N; i++){ // N because length(y) = N
         tempNest[i] = -Axest[i] + y[i];

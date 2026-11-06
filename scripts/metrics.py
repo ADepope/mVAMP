@@ -4,7 +4,7 @@ import argparse
 import os
 import csv
 
-print("---- Ploting mVAMP metrics and parameters ----")
+print("---- Plotting mVAMP metrics and parameters ----")
 print("\n",flush=True)
 
 # Initialize parser
@@ -12,21 +12,19 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-csv_metrics", "--csv-metrics", help = "Path to metrics csv file")
 parser.add_argument("-csv_test", "--csv-test", help = "Path to test csv file")
 parser.add_argument("-csv_params", "--csv-params", help = "Path to parameters csv file")
-parser.add_argument("-csv_prior", "--csv-prior", help = "Path to prior mixtures csv file")
+parser.add_argument("-csv_prior", "--csv-prior", help = "Unused; kept so existing commands still run")
 parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=35)
 
 args = parser.parse_args()
 csv_params_fpath = args.csv_params
 csv_metrics_fpath = args.csv_metrics
 csv_test_fpath = args.csv_test
-csv_prior_fpath = args.csv_prior
 it = int(args.iterations)
 
 print("Input arguments:")
 print("--csv-metrics", csv_metrics_fpath)
 print("--csv-test", csv_test_fpath)
 print("--csv-params", csv_params_fpath)
-print("--csv-prior", csv_prior_fpath)
 print("--iterations", it)
 print("\n", flush=True)
 
@@ -43,7 +41,7 @@ r2_test = []
 corr2_test = []
 
 for row in csv_test_reader:
-    # test output csv file structure: 
+    # test output csv file structure:
     #| iteration | R2 | Corr2 |
     r2_test.append(float(row[1]))
     corr2_test.append(float(row[2]))
@@ -61,8 +59,8 @@ r2_denoising = []
 r2_lmmse = []
 corr_train = []
 for row in csv_metrics_reader:
-    # train output csv file structure: 
-    #| iteration | R2 | x1_corr | R2 | x2_corr |
+    # metrics csv file structure:
+    #| iteration | R2 denoising | x1 corr | R2 LMMSE | x2 corr | z1 corr | z2 corr |
     r2_denoising.append(float(row[1]))
     r2_lmmse.append(float(row[3]))
     corr_train.append(float(row[2]))
@@ -79,26 +77,14 @@ next(csv_params_reader, None) # Skip header
 gam1 = []
 gamw = []
 for row in csv_params_reader:
-    # train output csv file structure: 
+    # train output csv file structure:
     #| iteration | alpha1 | gam1 | alpha2 | gam2 | gamw |
     gam1.append(float(row[2]))
     gamw.append(float(row[5]))
 gam1 = np.array(gam1)
 gamw = np.array(gamw)
 
-# ----------- Reading _prior.csv file ----------- #
-csv_prior_file = open(csv_prior_fpath, newline='', encoding='utf-8')
-csv_prior_reader = csv.reader((row.replace('\0', '') for row in csv_prior_file), delimiter=',')
-next(csv_prior_reader, None) # Skip header
-
-lam = []
-for row in csv_prior_reader:
-    # train output csv file structure: 
-    lam.append( 1 - float(row[2]))
-
-lam = np.array(lam)
-
-# ------------- Ploting metrics and parameters ------------ #
+# ------------- Plotting metrics and parameters ------------ #
 fig, ax = plt.subplots(3, figsize=(12, 10), dpi=300)
 prop_cycle = plt.rcParams['axes.prop_cycle']
 colors = prop_cycle.by_key()['color']

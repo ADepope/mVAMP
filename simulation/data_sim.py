@@ -35,7 +35,7 @@ print("\n...Simulating design matrix", flush=True)
 X = np.random.normal(0,1,N*M).reshape((N,M))
 
 print("\n...Simulating marker effects", flush=True)
-CM = int(M * lam) # number of cuasal markers
+CM = int(M * lam) # number of causal markers
 sigma2 = h2 / CM
 idx = random.sample(range(M), CM)
 beta = np.zeros(M)

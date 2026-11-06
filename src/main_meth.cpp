@@ -31,9 +31,8 @@ int main(int argc, char** argv)
 
     // Divide work for parallel ranks
     std::vector<double> MS = divide_work(Mt);
-    int M = MS[0]; // Numbe of markers for current rank
-    int S = MS[1]; // Offset of part of markers processed by current rank 
-    int Mm = MS[2]; // Index of marker max
+    int M = MS[0]; // Number of markers for current rank
+    int S = MS[1]; // Offset of part of markers processed by current rank
 
     // Infer model parameters and calculate test R2
     if (opt.get_run_mode() == "infere"){
@@ -51,7 +50,7 @@ int main(int argc, char** argv)
         double h2 = opt.get_h2(); // heritability
         double gamw = 1.0 / (1.0 - h2); // Noise precision
         double gam1 = opt.get_gam1(); // Signal noise precision
-        
+
         int max_iter = opt.get_iterations();
         int learn_vars = opt.get_learn_vars();
         int learn_prior_delay = opt.get_learn_prior_delay();
@@ -69,24 +68,24 @@ int main(int argc, char** argv)
         std::vector<double> true_signal;
         if(opt.get_true_signal_file() != "")
             true_signal = mpi_read_vec_from_file(opt.get_true_signal_file(), M, S);
-        else 
+        else
             true_signal = std::vector<double> (M, 0.0);
 
         // Read x1hat_init, if provided
         std::vector<double> x1hat_init;
         if(est_file_name != "")
             x1hat_init = mpi_read_vec_from_file(est_file_name, M, S);
-        else 
+        else
             x1hat_init = std::vector<double> (M, 0.0);
 
         // ---------------- running VAMP algorithm -------------------- //
-        vamp emvamp(N, 
+        vamp emvamp(N,
                     M,
                     Mt,
                     C,
                     gam1,
                     gamw,
-                    max_iter, 
+                    max_iter,
                     CG_max_iter,
                     CG_err_tol,
                     EM_max_iter,
@@ -105,28 +104,22 @@ int main(int argc, char** argv)
                     model,
                     verbosity,
                     rank); // Create VAMP instance
-        
+
         std::vector<double> x_est = emvamp.infere(&dataset); // Infer model parameters
 
     }
     else if (opt.get_run_mode() == "test") // just analyzing the result on the test data
     {
-       
+
         // reading test set
         const std::string mrkfp_test = opt.get_meth_file_test();
         const std::string pheno_test = opt.get_phen_file_test(); // currently it is only supported passing one pheno files as an input argument
 
         int N_test = opt.get_N_test();
-
-        std::vector<double> MS = divide_work(Mt);
-        int M = MS[0];
-        int S = MS[1];
-
         double alpha_scale = opt.get_alpha_scale();
 
-
         data dataset_test(pheno_test, mrkfp_test, model, N_test, M, Mt, S, rank, alpha_scale);
-        
+
         std::vector<double> y_test = dataset_test.get_phen();
 
         // Open output file for storing test metrics (R2)
@@ -140,8 +133,8 @@ int main(int argc, char** argv)
                             &outcsv_test_fh),
                             __LINE__, __FILE__);
         // Headers for output files
-        std::vector<std::string> test_header{"iteration", 
-                                            "R2 test", 
+        std::vector<std::string> test_header{"iteration",
+                                            "R2 test",
                                             "z correlation test"};
         if(rank == 0)
             write_ofile_csv_header(outcsv_test_fh, &test_header);
@@ -173,7 +166,7 @@ int main(int argc, char** argv)
             // normalization of estimates
             for (int i0 = 0; i0 < x_est.size(); i0++)
                 x_est[i0] *= sqrt( (double) N_test );
-                
+
             // Predictions
             std::vector<double> z_test = dataset_test.Ax(x_est.data());
 
@@ -181,7 +174,7 @@ int main(int argc, char** argv)
             double l2_pred_err2 = 0;
             for (int i0 = 0; i0 < N_test; i0++){
                 l2_pred_err2 += (y_test[i0] - z_test[i0]) * (y_test[i0] - z_test[i0]);
-            }  
+            }
 
             // Standard deviation of true outcome
             double stdev = calc_stdev(y_test);
@@ -195,13 +188,9 @@ int main(int argc, char** argv)
                 std::cout << r2 << ", ";
                 params.push_back(r2);
                 params.push_back(corr_y_2);
-            }
-            if (rank == 0) {
                 write_ofile_csv(outcsv_test_fh, it, &params);
             }
         }
-
-        
     }
     else if (opt.get_run_mode() == "association_test"){
 
@@ -212,9 +201,8 @@ int main(int argc, char** argv)
 
         // Reading data set
         data dataset(phenfp, mrkfp, model, N , M, Mt, S, rank, alpha_scale);
-        
+
         std::string pval_method = opt.get_pval_method();
-        std::vector<double> pvals(M, 0.0);
         std::string filepath_out;
 
         if(pval_method == "se"){ // TODO: SE option not tested
@@ -223,18 +211,18 @@ int main(int argc, char** argv)
             int pos1 = r1_file_name.rfind("it_") + 3;
             int pos2 = r1_file_name.rfind(".bin");
             std::string it_str = r1_file_name.substr(pos1, pos2 - pos1);
-            int it = std::stoi(it_str);
             if (rank == 0)
                 std::cout << r1_file_name << std::endl;
             std::vector<double> r1 = mpi_read_vec_from_file(r1_file_name, M, S);
 
             double gam1 = opt.get_gam1(); // Signal noise precision
 
+            std::vector<double> pvals(M, 0.0);
             for(int j=0; j < M; j++){
                 boost::math::normal norm(r1[j], sqrt(1.0 / (gam1 * (double) N )));
                 double pval = boost::math::cdf(norm, 0);
                 if(r1[j] <= 0.0)
-                    pval = 1 - pval; 
+                    pval = 1 - pval;
                 pvals[j] = pval;
             }
             filepath_out = out_dir + "/" + out_name + "_it_" + it_str + "_pval_se.bin";
@@ -248,7 +236,6 @@ int main(int argc, char** argv)
             int pos1 = est_file_name.rfind("it_") + 3;
             int pos2 = est_file_name.rfind(".bin");
             std::string it_str = est_file_name.substr(pos1, pos2 - pos1);
-            int it = std::stoi(it_str);
             std::vector<double> x1_hat = mpi_read_vec_from_file(est_file_name, M, S);
             // normalization of estimates
             for (int i0 = 0; i0 < x1_hat.size(); i0++)
@@ -262,6 +249,12 @@ int main(int argc, char** argv)
                 std::cout << "Storing p-values to file " + filepath_out << std::endl;
             mpi_store_vec_to_file(filepath_out, pvals, S, M);
         }
+        else if (rank == 0) {
+            std::cout << "FATAL: unknown --pval-method \"" << pval_method << "\" (use se or loo)" << std::endl;
+        }
+    }
+    else if (rank == 0) {
+        std::cout << "FATAL: unknown --run-mode \"" << opt.get_run_mode() << "\" (use infere, test or association_test)" << std::endl;
     }
 
     MPI_Barrier(MPI_COMM_WORLD);

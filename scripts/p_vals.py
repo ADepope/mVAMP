@@ -6,7 +6,7 @@ import csv
 import os
 from array import array
 
-# This script calculates p values from r1 vector
+# This script calculates state evolution p-values from the r1 vector
 print("----- Computing mVAMP p-values -----")
 print("\n", flush=True)
 
@@ -43,10 +43,10 @@ next(csv_params_reader, None) # Skip header
 
 gam1 = []
 for row in csv_params_reader:
-    # train output csv file structure: 
+    # train output csv file structure:
     #| iteration | alpha1 | gam1 | alpha2 | gam2 | gamw |
     gam1.append(float(row[2]))
-gam1 = np.array(gam1)   
+gam1 = np.array(gam1)
 
 print("...Reading file")
 print(r1_fpath)
@@ -59,7 +59,7 @@ pvals = np.zeros(Mt)
 for i in range(Mt):
     pvals[i] = norm.cdf(x=0, loc=r1[i], scale=np.sqrt(1 / (gam1[it-1] * N)))
     if r1[i] <= 0:
-        pvals[i] = 1 - pvals[i]  
+        pvals[i] = 1 - pvals[i]
 
 outf = os.path.join(csv_dirpath, out_name+'.bin')
 print("...Saving p-values to file")

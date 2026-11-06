@@ -5,12 +5,12 @@ import os
 import struct
 import random
 
-# This script simulate iid phenotype on the top of real data
-# INPUT: 
+# This script simulates an iid phenotype on top of real methylation data
+# INPUT:
 #       - Parameters for simulation
-#       - adjusted and standardized methylation data stored in zarr files (each file for chrommosome)
+#       - adjusted and standardized methylation data stored in zarr files (one file per chromosome)
 #       - output file path
-# OUTPUT: 
+# OUTPUT:
 #       - .bin files for train and test subsets. Here we store design matrix of 8 byte doubles.
 #       - .bin file of true signals stored as 8 byte doubles.
 #       - simulated phenotype file .phen in plink format
@@ -41,7 +41,7 @@ run = int(args.run)
 M = int(args.M) # number of markers
 N = int(args.N) # number of samples
 
-# Subscrit for simulation
+# Suffix for simulation file names
 sub = "h2_%d_lam_%d_run_%d" % (h2*100, lam*100, run)
 
 # File names for simulation
@@ -67,8 +67,8 @@ dimf_test.write("%d %d" % (N_test, M))
 dimf_train.close()
 dimf_test.close()
 
-# List of zarr files in directory 
-files = os.listdir(zarr_fpath)
+# List of zarr files in directory (sorted so the marker order is reproducible)
+files = sorted(os.listdir(zarr_fpath))
 
 # Number of causal markers
 cm = int(M * lam)
@@ -99,30 +99,30 @@ Mtot = 0
 train_binf = open(os.path.join(out_fpath, fname_train + ".bin"), "wb")
 test_binf = open(os.path.join(out_fpath, fname_test + ".bin"), "wb")
 
-# For all zarr files (each file one chrommosome)
+# For all zarr files (one file per chromosome)
 for i,f in enumerate(files):
 
     # zarr file name
     print("Processing file %s" % f, flush=True)
-    
-    # Loaded chunk of data (one chrommosome)
+
+    # Loaded chunk of data (one chromosome)
     store = zarr.open(os.path.join(zarr_fpath, f))
-    
+
     # Check dimensions
     Ni = np.shape(store)[0]
     Mi = np.shape(store)[1]
     if N != Ni:
-        raise Exception("Number of samples in zarr file and specified do not mach!")
+        raise Exception("Number of samples in zarr file and specified do not match!")
 
-    # Mask chunk of data (store), transpose, flatten and write to binary file as a vector. Coded as one long command due to memmory efficiency
+    # Mask chunk of data (store), transpose, flatten and write to binary file as a vector. Coded as one long command for memory efficiency
     train_binf.write(struct.pack(str(N_train*Mi)+'d', *np.array(store)[msk,:].transpose().ravel().squeeze())) # (N, Mi) -> (N_train, Mi) -> (Mi, N_train) -> (Mi * N_train)
     test_binf.write(struct.pack(str(N_test*Mi)+'d', *np.array(store)[~msk,:].transpose().ravel().squeeze())) # (N, Mi) -> (N_test, Mi) -> (Mi, N_test) -> (Mi * N_test)
-    
+
     # X @ beta for current chromosome
     g += np.matmul(np.array(store), beta[Mtot:(Mtot+Mi)])
     Mtot += Mi
-    
-    # free memmory
+
+    # free memory
     del store
 
 # Close binary files
@@ -130,10 +130,10 @@ train_binf.close()
 test_binf.close()
 
 if Mtot != M:
-    raise Exception("Number of markers in zarr files and specified do not mach!")   
+    raise Exception("Number of markers in zarr files and specified do not match!")
 print("Total number of loaded markers:", Mtot, flush=True)
 
-# Variance of noise based on specified heritability 
+# Variance of noise based on specified heritability
 evar = 1.0 / h2 - 1.0
 
 # Add noise to g
@@ -152,9 +152,9 @@ phenf_test = open(os.path.join(out_fpath, fname_test + ".phen"), "w")
 phenf_train = open(os.path.join(out_fpath, fname_train + ".phen"), "w")
 
 for i, pheno in enumerate(y):
-    
+
     line = "%d %d %0.10f\n" % (i, i, pheno)
-    
+
     # train test splits
     if msk[i]:
         phenf_train.write(line)

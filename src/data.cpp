@@ -1,20 +1,19 @@
 #include "data.hpp"
-#include <cmath> 
+#include <cmath>
+#include <climits>
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
-#include <sstream>
+#include <limits>
 #include <regex>
-#include <filesystem>
-#include <cassert> // contains assert
+#include <cassert>
 #include <mpi.h>
 #include <omp.h>
-#include "utilities.hpp"
 #include <immintrin.h>
-#include <bits/stdc++.h>
+#include "utilities.hpp"
 
 //******************
-//  CONSTRUCTORS 
+//  CONSTRUCTORS
 //******************
 
 // -> DESCRIPTION:
@@ -22,14 +21,14 @@
 //      constructor that is given a file pointer to the phenotype and marker file
 //
 data::data(std::string phenfp, std::string methfp, std::string data_class, const int N, const int M, const int Mt, const int S, const int rank, double alpha_scale) :
+    Mt(Mt),
+    N(N),
+    M(M),
+    S(S),
+    rank(rank),
     phenfp(phenfp),
     methfp(methfp),
     data_class(data_class),
-    N(N),
-    M(M),
-    Mt(Mt),
-    S(S),
-    rank(rank),
     alpha_scale(alpha_scale) {
 
     mave = (double*) _mm_malloc(size_t(M) * sizeof(double), 32);
@@ -54,7 +53,7 @@ data::data(std::string phenfp, std::string methfp, std::string data_class, const
 //
 //      Read phenotype file assuming PLINK format:
 //      Family ID, Individual ID, Phenotype; One row per individual
-// 
+//
 void data::read_phen(bool standardize) {
 
     std::ifstream infile(phenfp);
@@ -64,7 +63,6 @@ void data::read_phen(bool standardize) {
     double sum = 0.0;
 
     if (infile.is_open()) {
-        int line_n = 0;
         nonas = 0, nas = 0;
         while (getline(infile, line)) {
 
@@ -77,11 +75,10 @@ void data::read_phen(bool standardize) {
                 phen_data.push_back(atof(tokens[2].c_str()));
                 sum += atof(tokens[2].c_str());
             }
-            line_n += 1;
         }
         infile.close();
 
-        // fail if the input size doesn not match the size of the read data
+        // fail if the input size does not match the size of the read data
         assert(nas + nonas == N);
 
         // Center and scale
@@ -112,7 +109,7 @@ void data::read_phen(bool standardize) {
 // -> DESCRIPTION:
 //
 //      Reads methylation design matrix assuming matrix of doubles stores in binary format
-// 
+//
 void data::read_methylation_data(){
 
     double ts = MPI_Wtime();
@@ -130,7 +127,7 @@ void data::read_methylation_data(){
 
     printf("INFO  : rank %d has allocated %zu bytes (%.3f GB) for raw data.\n", rank, size_bytes, double(size_bytes) / 1.0E9);
 
-    // Offset to section of bed file to be processed by task
+    // Offset to section of the data file to be processed by task
     MPI_Offset offset = size_t(0) + size_t(S) * size_t(N) * sizeof(double);
 
     // Gather the sizes to determine common number of reads
@@ -142,7 +139,7 @@ void data::read_methylation_data(){
     mpi_file_read_at_all <double*> (size_t(M) * size_t(N), offset, methfh, MPI_DOUBLE, NREADS, meth_data, bytes);
 
     MPI_File_close(&methfh);
-    
+
     double te = MPI_Wtime();
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -155,7 +152,7 @@ void data::read_methylation_data(){
 // -> DESCRIPTION:
 //
 //      Reads covariates files, used with a probit model
-// 
+//
 void data::read_covariates(std::string covfp, int C){ // values should be separate with space delimiter
 
     if (C==0)
@@ -164,8 +161,7 @@ void data::read_covariates(std::string covfp, int C){ // values should be separa
     double start = MPI_Wtime();
 
     std::ifstream covf(covfp);
-    std::string line; 
-    //std::regex re("\\S+");
+    std::string line;
     std::regex re("\\s+");
 
     int i = 0;
@@ -193,7 +189,7 @@ void data::read_covariates(std::string covfp, int C){ // values should be separa
             exit(EXIT_FAILURE);
         }
 
-        covs.push_back(entries);        
+        covs.push_back(entries);
     }
 
     double end = MPI_Wtime();
@@ -203,24 +199,24 @@ void data::read_covariates(std::string covfp, int C){ // values should be separa
 
     // Normalize covariates
     for(int covi = 0; covi < C; covi++){
-            
+
         long double cavg = 0.0;
         long double csig = 0.0;
 
         for (int i = 0; i < N; i++) {
-            cavg += covs[i][covi];    
+            cavg += covs[i][covi];
         }
         cavg = cavg / double(N);
 
         for (int i = 0; i < N; i++) {
-            csig += ((covs[i][covi] - cavg) * (covs[i][covi] - cavg));            
+            csig += ((covs[i][covi] - cavg) * (covs[i][covi] - cavg));
         }
         csig = sqrt(csig / double(N));
 
         for (int i = 0; i < N; i++) {
             if(csig < 0.00000001)
                 covs[i][covi] = 0;
-            else 
+            else
                 covs[i][covi] = (covs[i][covi] - cavg) / csig;
         }
     }
@@ -251,12 +247,12 @@ void data::compute_markers_statistics() {
 #ifdef _OPENMP
 #pragma omp simd reduction(+:suma)
 #endif
-        for (int j = 0; j < N; j++) 
+        for (int j = 0; j < N; j++)
             suma += methm[j];
 
         //calculating vector of marker precision
         mave[i] = suma / double( get_nonas() );
-            
+
         double sumsqr = 0.0;
 
 #ifdef _OPENMP
@@ -266,20 +262,19 @@ void data::compute_markers_statistics() {
             double val = (methm[j] - mave[i]);
             sumsqr += val * val;
         }
-            
+
         if (sumsqr != 0.0)
             if (alpha_scale == 1.0)
                 msig[i] = 1.0 / sqrt(sumsqr / (double( get_nonas() ) - 1.0));
             else
                 msig[i] = 1.0 / pow( sqrt(sumsqr / (double( get_nonas() ) - 1.0)), alpha_scale );
-        else 
+        else
             msig[i] = 1.0;
-    }    
-    
-        double end = MPI_Wtime();
-        if (rank == 0){
-            std::cout << "rank = " << rank << ": statistics took " << end - start << " seconds to run." << std::endl;
-        }
+    }
+
+    double end = MPI_Wtime();
+    if (rank == 0)
+        std::cout << "rank = " << rank << ": statistics took " << end - start << " seconds to run." << std::endl;
 }
 
 //**************************************************************
@@ -289,7 +284,7 @@ void data::compute_markers_statistics() {
 
 // -> DESCRIPTION:
 //
-//      Computes < phen, (A_mloc - mu) * sigma_inv
+//      Computes < phen, (A_mloc - mu) * sigma_inv >
 //
 double data::dot_product(const int mloc, double* __restrict__ phen, const double mu, const double sigma_inv) {
   // always takes all individuals as their number is typically small in methylation studies
@@ -323,8 +318,7 @@ std::vector<double> data::ATx(double* __restrict__ phen) {
          ATx[mloc] = dot_product(mloc, phen, mave[mloc], msig[mloc]);
 
     // for stability reasons we scale design matrix A with 1/sqrt(number of people)
-    double scale;
-    scale = 1.0 / sqrt(N);
+    double scale = 1.0 / sqrt(N);
 
     for (int mloc=0; mloc<M; mloc++)
         ATx[mloc] *= scale;
@@ -344,7 +338,7 @@ std::vector<double> data::Ax(double* __restrict__ phen) {
     double* mave = get_mave();
     double* msig = get_msig();
     double* meth;
-    std::vector<double> Ax_temp(N, 0.0);    
+    std::vector<double> Ax_temp(N, 0.0);
 
     for (int i=0; i<M; i++){
 
@@ -352,7 +346,7 @@ std::vector<double> data::Ax(double* __restrict__ phen) {
 
         double ave = mave[i];
         double sig_phen_i = msig[i] * phen[i];
-            
+
 #ifdef _OPENMP
 #pragma omp parallel for simd shared(Ax_temp)
 #endif
@@ -373,7 +367,7 @@ std::vector<double> data::Ax(double* __restrict__ phen) {
 }
 
 std::vector<double> data::Zx(std::vector<double> phen){
-    
+
     std::vector<double> Zx_temp(N, 0.0);
 
     for (int i=0; i<N; i++)
@@ -383,25 +377,22 @@ std::vector<double> data::Zx(std::vector<double> phen){
 }
 
 std::vector<double> data::pvals_loo(std::vector<double> z1, std::vector<double> y, std::vector<double> x1_hat){
-    
+
     std::vector<double> pvals(M,0.0);
     std::vector<double> y_mod(N, 0.0); // phenotypic values corrected for genetic predictors
 
     for (int i=0; i<N; i++)
         y_mod[i] = y[i] - z1[i];
 
-    double* mave = get_mave();
-    double* msig = get_msig();
-
     for (int j=0; j<M; j++){
 
         std::vector<double> y_mark = y_mod;
-                
+
         size_t methix = size_t(j) * size_t(N);
         const double* meth = &meth_data[methix];
-        double sumx = 0.0, sumsqx = 0.0, sumxy = 0.0, sumy = 0.0, sumsqy = 0.0; 
-  
-        for (int i=0; i<N; i++) 
+        double sumx = 0.0, sumsqx = 0.0, sumxy = 0.0, sumy = 0.0, sumsqy = 0.0;
+
+        for (int i=0; i<N; i++)
             y_mark[i] += meth[i] / sqrt(N) * x1_hat[j];
 
         for (int i=0; i<N; i++) {

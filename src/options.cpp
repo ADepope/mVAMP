@@ -1,12 +1,8 @@
 #include <iostream>
 #include <cstring>
+#include <cstdlib>
 #include <sstream>
-#include <iostream>
-#include <fstream>
-#include <cassert>
-#include <regex>
 #include <mpi.h>
-#include <boost/algorithm/string/trim.hpp> // -> module load boost 
 #include "options.hpp"
 
 // Function to parse command line options
@@ -16,11 +12,9 @@ void Options::read_command_line_options(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     std::stringstream ss;
-    ss << "\nardyh command line options:\n";
+    ss << "\nmVAMP command line options:\n";
 
     for (int i=1; i<argc; ++i) {
-
-        // std::cout << "input string = '" << argv[i] << "'"<< std::endl;
 
         if (!strcmp(argv[i], "--meth-file")) {
             if (i == argc - 1) fail_if_last(argv, i);
@@ -115,7 +109,7 @@ void Options::read_command_line_options(int argc, char** argv) {
             if (i == argc - 1) fail_if_last(argv, i);
             verbosity = atoi(argv[++i]);
             ss << "--verbosity " << verbosity << "\n";
-        } 
+        }
 
         else if (!strcmp(argv[i], "--learn-vars")) {
             if (i == argc - 1) fail_if_last(argv, i);
@@ -152,12 +146,12 @@ void Options::read_command_line_options(int argc, char** argv) {
             }
             num_mix_comp = (unsigned int) atoi(argv[++i]);
             ss << "--num-mix-comp " << num_mix_comp << "\n";
-        } 
+        }
         else if (!strcmp(argv[i], "--out-dir")) {
             if (i == argc - 1) fail_if_last(argv, i);
             out_dir = argv[++i];
             ss << "--out-dir " << out_dir << "\n";
-        }   
+        }
         else if (!strcmp(argv[i], "--out-name")) {
             if (i == argc - 1) fail_if_last(argv, i);
             out_name = argv[++i];
@@ -168,46 +162,47 @@ void Options::read_command_line_options(int argc, char** argv) {
             model = argv[++i];
             ss << "--model " << model << "\n";
         }
-        else if (!strcmp(argv[i], "--stop-criteria-thr")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--stop-criteria-thr")) {
             if (i == argc - 1) fail_if_last(argv, i);
             stop_criteria_thr = atof(argv[++i]);
             ss << "--stop-criteria-thr " << stop_criteria_thr << "\n";
         }
-        else if (!strcmp(argv[i], "--merge-vars-thr")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--merge-vars-thr")) {
             if (i == argc - 1) fail_if_last(argv, i);
             merge_vars_thr = atof(argv[++i]);
             ss << "--merge-vars-thr " << merge_vars_thr << "\n";
         }
-        else if (!strcmp(argv[i], "--EM-err-thr")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--EM-err-thr")) {
             if (i == argc - 1) fail_if_last(argv, i);
             EM_err_thr = atof(argv[++i]);
             ss << "--EM-err-thr " << EM_err_thr << "\n";
         }
-        else if (!strcmp(argv[i], "--alpha-scale")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--alpha-scale")) {
             if (i == argc - 1) fail_if_last(argv, i);
             alpha_scale = atof(argv[++i]);
             ss << "--alpha-scale " << alpha_scale << "\n";
         }
-        else if (!strcmp(argv[i], "--rho")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--rho")) {
             if (i == argc - 1) fail_if_last(argv, i);
             rho = atof(argv[++i]);
             ss << "--rho " << rho << "\n";
         }
-        else if (!strcmp(argv[i], "--probit-var")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--probit-var")) {
             if (i == argc - 1) fail_if_last(argv, i);
             probit_var = atof(argv[++i]);
-            ss << "--probit-var" << probit_var << "\n";
+            ss << "--probit-var " << probit_var << "\n";
         }
-        else if (!strcmp(argv[i], "--h2")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--h2")) {
             if (i == argc - 1) fail_if_last(argv, i);
             h2 = atof(argv[++i]);
             ss << "--h2 " << h2 << "\n";
         }
-        else if (!strcmp(argv[i], "--gam1")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--gam1")) {
             if (i == argc - 1) fail_if_last(argv, i);
             gam1 = atof(argv[++i]);
             ss << "--gam1 " << gam1 << "\n";
-        } else if (!strcmp(argv[i], "--EM-max-iter")){ // strcmp return 0 if both strings are identical
+        }
+        else if (!strcmp(argv[i], "--EM-max-iter")) {
             if (i == argc - 1) fail_if_last(argv, i);
             if (atoi(argv[i + 1]) < 1) {
                 std::cout << "FATAL  : option --EM-max-iter has to be a strictly positive integer! (" << argv[i + 1] << " was passed)" << std::endl;
@@ -215,8 +210,8 @@ void Options::read_command_line_options(int argc, char** argv) {
             }
             EM_max_iter = (unsigned int) atoi(argv[++i]);
             ss << "--EM-max-iter " << EM_max_iter << "\n";
-        } 
-        else if (!strcmp(argv[i], "--Mt")){ // strcmp return 0 if both strings are identical
+        }
+        else if (!strcmp(argv[i], "--Mt")) {
             if (i == argc - 1) fail_if_last(argv, i);
             if (atoi(argv[i + 1]) < 1) {
                 std::cout << "FATAL  : option --Mt has to be a strictly positive integer! (" << argv[i + 1] << " was passed)" << std::endl;
@@ -225,7 +220,7 @@ void Options::read_command_line_options(int argc, char** argv) {
             Mt = (unsigned int) atoi(argv[++i]);
             ss << "--Mt " << Mt << "\n";
         }
-        else if (!strcmp(argv[i], "--C")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--C")) {
             if (i == argc - 1) fail_if_last(argv, i);
             if (atoi(argv[i + 1]) < 0) {
                 std::cout << "FATAL  : option --C has to be a non-negative integer! (" << argv[i + 1] << " was passed)" << std::endl;
@@ -234,7 +229,7 @@ void Options::read_command_line_options(int argc, char** argv) {
             C = (unsigned int) atoi(argv[++i]);
             ss << "--C " << C << "\n";
         }
-        else if (!strcmp(argv[i], "--N")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--N")) {
             if (i == argc - 1) fail_if_last(argv, i);
             if (atoi(argv[i + 1]) < 1) {
                 std::cout << "FATAL  : option --N has to be a strictly positive integer! (" << argv[i + 1] << " was passed)" << std::endl;
@@ -243,25 +238,25 @@ void Options::read_command_line_options(int argc, char** argv) {
             N = (unsigned int) atoi(argv[++i]);
             ss << "--N " << N << "\n";
         }
-        else if (!strcmp(argv[i], "--N-test")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--N-test")) {
             if (i == argc - 1) fail_if_last(argv, i);
             if (atoi(argv[i + 1]) < 1) {
-                std::cout << "FATAL  : option --N_test has to be a strictly positive integer! (" << argv[i + 1] << " was passed)" << std::endl;
+                std::cout << "FATAL  : option --N-test has to be a strictly positive integer! (" << argv[i + 1] << " was passed)" << std::endl;
                 exit(EXIT_FAILURE);
             }
             N_test = (unsigned int) atoi(argv[++i]);
             ss << "--N-test " << N_test << "\n";
         }
-        else if (!strcmp(argv[i], "--Mt-test")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--Mt-test")) {
             if (i == argc - 1) fail_if_last(argv, i);
             if (atoi(argv[i + 1]) < 1) {
-                std::cout << "FATAL  : option --Mt_test has to be a strictly positive integer! (" << argv[i + 1] << " was passed)" << std::endl;
+                std::cout << "FATAL  : option --Mt-test has to be a strictly positive integer! (" << argv[i + 1] << " was passed)" << std::endl;
                 exit(EXIT_FAILURE);
             }
             Mt_test = (unsigned int) atoi(argv[++i]);
             ss << "--Mt-test " << Mt_test << "\n";
         }
-        else if (!strcmp(argv[i], "--CG-max-iter")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--CG-max-iter")) {
             if (i == argc - 1) fail_if_last(argv, i);
             if (atoi(argv[i + 1]) < 1) {
                 std::cout << "FATAL  : option --CG-max-iter has to be a strictly positive integer! (" << argv[i + 1] << " was passed)" << std::endl;
@@ -270,11 +265,12 @@ void Options::read_command_line_options(int argc, char** argv) {
             CG_max_iter = (unsigned int) atoi(argv[++i]);
             ss << "--CG-max-iter " << CG_max_iter << "\n";
         }
-        else if (!strcmp(argv[i], "--CG-err-tol")){ // strcmp return 0 if both strings are identical
+        else if (!strcmp(argv[i], "--CG-err-tol")) {
             if (i == argc - 1) fail_if_last(argv, i);
             CG_err_tol = atof(argv[++i]);
             ss << "--CG-err-tol " << CG_err_tol << "\n";
-        } else if (!strcmp(argv[i], "--pval-method")) {
+        }
+        else if (!strcmp(argv[i], "--pval-method")) {
             if (i == argc - 1) fail_if_last(argv, i);
             pval_method = argv[++i];
             ss << "--pval-method " << pval_method << "\n";
@@ -295,7 +291,7 @@ void Options::fail_if_last(char** argv, const int i) {
     exit(EXIT_FAILURE);
 }
 
-// Check for minimal setup: a meth file
+// Check for minimal setup: a methylation data file
 void Options::check_options() {
     if (get_meth_file() == "" && get_meth_file_test() == "") {
         std::cout << "FATAL  : no meth file provided! Please use the --meth-file option." << std::endl;

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import csv
 
-# This script visualize manhattan plot
+# This script draws a Manhattan plot of mVAMP p-values
 print("---------- Association testing for mVAMP ----------")
 print("\n", flush=True)
 
@@ -63,7 +63,6 @@ chrs = np.array(chrs)
 
 pval_th = th / M
 
-#plt.rcParams.update({'font.size': 20})
 plt.figure(figsize=(12,8), dpi=300)
 plt.plot(np.array([0, M]), np.array([-np.log10(pval_th), -np.log10(pval_th)]), "k--")
 plt.xlabel('Chromosome', fontsize=22)
@@ -86,7 +85,7 @@ for chr in range(22):
     je = sum(Mchr[:chr+1])
     pvals_chr = pvals_sat[js:je]
     plt.scatter(x=np.arange(js,je), y=-np.log10(pvals_chr), s=6)
-    
+
     if chr % 2 == 0:
         chrs_ticks.append("")
     else:

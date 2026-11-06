@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 eps = 1e-32
 
 # This script visualize ROC curve
-print("...Ploting ROC curve for mVAMP", flush=True)
+print("...Plotting ROC curve for mVAMP", flush=True)
 print("\n", flush=True)
 
 # Initialize parser
@@ -60,7 +60,7 @@ fprs, tprs, thresholds = roc_curve(true, 1 - pvals)
 area = auc(fprs, tprs)
 plt.plot(fprs, tprs, label=it)
 
-pval_th = 0.05 / M
+pval_th = th / M  # Bonferroni-corrected threshold
 est = np.zeros(M)
 est[pvals < pval_th] = 1
 

@@ -15,35 +15,23 @@
 #include <boost/numeric/ublas/lu.hpp>
 #include <boost/numeric/ublas/io.hpp>
 
-
 std::vector<double> vamp::infere_bin_class( data* dataset ){
 
     std::vector<double> metrics(12,0); // Error metrics from denoising and lmmse steps to save to csv [TP, TN, FP, FN, ACC, x1_corr | TP, TN, FP, FN, ACC, x2_corr]
     std::vector<double> params(8,0); // Parameters from denoising and lmmse steps to save to csv [alpha1 | beta1 | gam1 | tau1 | alpha2 | beta2 | gam2 | tau2 ]
 
     double total_time = 0;
-    double tol = 1e-11;
 
     std::vector<double> x1_hat_d(M, 0.0);
-    std::vector<double> x1_hat_d_prev(M, 0.0);
-    std::vector<double> r1_prev(M, 0.0);
-    std::vector<double> p1_prev(N, 0.0);
     std::vector<double> x1_hat_prev(M, 0.0);
 
-    // tau1 = gam1; // hardcoding initial variability
-    //tau1 = 1e-1; // ideally sqrt( tau_10 / v ) approx 1, since it is to be composed with a gaussian CDF
-    tau1 = gam1;
-    // double tau2_prev = 0;
-    double gam1_prev = gam1;
-    double tau1_prev = tau1;
-    double gam1_max = gam1;
+    tau1 = gam1; // initial precision of p1
 
     double sqrtN = sqrt(N);
 
     std::vector<double> true_signal_scaled = true_signal;
     for (int i = 0; i < true_signal_scaled.size(); i++)
         true_signal_scaled[i] = true_signal[i] * sqrtN;
-    std::vector<double> true_g = (*dataset).Ax(true_signal_scaled.data());
 
     // Bernoulli distribution for trace estimation
     std::bernoulli_distribution bern(0.5);
@@ -66,8 +54,8 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
     std::vector<double> gg;
 
     for (int it = 1; it <= max_iter; it++)
-    {    
-        double start_covar = 0, stop_covar = 0, start_denoising = 0, stop_denoising = 0; // meassuring time
+    {
+        double start_covar = 0, stop_covar = 0, start_denoising = 0, stop_denoising = 0; // measuring time
 
         if (rank == 0)
             std::cout << std::endl << "********************" << std::endl << "iteration = "<< it << std::endl << "********************" << std::endl;
@@ -78,7 +66,6 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
         if (it == 1 && C > 0){
             start_covar = MPI_Wtime();
             gg = z1_hat;
-            //cov_eff = grad_desc_cov(y, gg, probit_var, Z, cov_eff); // std::vector<double>(C, 0.0)
             cov_eff = Newton_method_cov(y, gg, Z, cov_eff);
 
             if (rank == 0){
@@ -93,7 +80,7 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
             if (rank == 0)
                 std::cout << "Computing covariate effects took " << stop_covar - start_covar << " seconds." << std::endl;
         }
-        
+
         // ---------- DENOISING x ---------- //
 
         start_denoising = MPI_Wtime();
@@ -103,64 +90,45 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
 
         x1_hat_prev = x1_hat;
         double alpha1_prev = alpha1;
-        //double gam1_reEst_prev;
-        //int it_revar = 1;
 
-        //for (; it_revar <= auto_var_max_iter; it_revar++){
+        // new signal estimate
+        for (int i = 0; i < M; i++)
+            x1_hat[i] = g1(r1[i], gam1);
 
-            // new signal estimate
-            for (int i = 0; i < M; i++)
-                x1_hat[i] = g1(r1[i], gam1);
+        // new MMSE estimate
+        double sum_d = 0;
+        for (int i=0; i<M; i++)
+        {
+            x1_hat_d[i] = g1d(r1[i], gam1);
+            sum_d += x1_hat_d[i];
+        }
 
-            std::vector<double> x1_hat_m_r1 = x1_hat;
-            for (int i0 = 0; i0 < x1_hat_m_r1.size(); i0++)
-                x1_hat_m_r1[i0] = x1_hat_m_r1[i0] - r1[i0];
+        alpha1 = 0;
+        MPI_Allreduce(&sum_d, &alpha1, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        alpha1 /= Mt;
+        eta1 = gam1 / alpha1;
 
-            // new MMSE estimate
-            double sum_d = 0;
-            for (int i=0; i<M; i++)
-            {
-                x1_hat_d[i] = g1d(r1[i], gam1);
-                sum_d += x1_hat_d[i];
-            }
+        if (it > learn_prior_delay)
+            updatePrior();
 
-            alpha1 = 0;
-            MPI_Allreduce(&sum_d, &alpha1, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-            alpha1 /= Mt;
-            eta1 = gam1 / alpha1;
+        // prior distribution parameters
+        if (rank == 0){
+            std::cout << "Prior variances = ";
+            for (int i = 0; i < vars.size(); i++)
+                std::cout << vars[i] / (double) N << ' ';
+            std::cout << std::endl;
 
-            //if (it <= 1)
-            //    break;
-
-            //gam1_reEst_prev = gam1;
-            //gam1 = std::min( std::max(  1 / (1/eta1 + l2_norm2(x1_hat_m_r1, 1)/Mt), gamma_min ), gamma_max );
-
-            if (it > learn_prior_delay)
-                updatePrior();
-
-            // prior distribution parameters
-            if (rank == 0){
-                std::cout << "Prior variances = ";
-                for (int i = 0; i < vars.size(); i++)
-                    std::cout << vars[i] / (double) N << ' ';
-                std::cout << std::endl;
-    
-                std::cout << "Prior probabilities = ";
-                for (int i = 0; i < probs.size(); i++)
-                    std::cout << probs[i] << ' ';
-                std::cout << std::endl;
-            }
-
-            //if ( abs(gam1 - gam1_reEst_prev) < 1e-3 )
-            //    break;
-            
-        //}
+            std::cout << "Prior probabilities = ";
+            for (int i = 0; i < probs.size(); i++)
+                std::cout << probs[i] << ' ';
+            std::cout << std::endl;
+        }
 
         // damping on the level of x1
-        if (it > 1){ 
+        if (it > 1){
             for (int i = 0; i < M; i++)
                 x1_hat[i] = rho * x1_hat[i] + (1-rho) * x1_hat_prev[i];
-            
+
             alpha1 = rho * alpha1 + (1-rho) * alpha1_prev;
         }
 
@@ -185,68 +153,43 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
         if (rank == 0)
             std::cout << "...storing r1 to file " << filepath_out_r1 << std::endl;
 
-        // Error meassure
+        // Error measure
         double x1_corr = inner_prod(x1_hat, true_signal_scaled, 1) / sqrt( l2_norm2(x1_hat, 1) * l2_norm2(true_signal_scaled, 1) );
 
         MPI_Barrier(MPI_COMM_WORLD);
-    
+
         gam_before = gam2;
         gam2 = std::min( std::max( eta1 - gam1, gamma_min ), gamma_max );
 
-        std::vector<double> r2_prev = r2;
         for (int i = 0; i < M; i++)
             r2[i] = (eta1 * x1_hat[i] - gam1 * r1[i]) / gam2;
 
         // ---------- DENOISING Z ----------- //
-    
+
         std::vector<double> y = (*dataset).get_phen();
 
-        std::vector<double> z1_hat_prev = z1_hat;
-        //double tau1_reEst_prev;
-        //it_revar = 1;
-        //auto_var_max_iter = 1;
-        double beta1;
+        // new signal estimate
+        for (int i=0; i<N; i++){
+            double m_cov = 0;
+            if (C>0)
+                m_cov = inner_prod(Z[i], cov_eff, 0);
 
-        //for (; it_revar <= auto_var_max_iter; it_revar++){
+            z1_hat[i] = g1_bin_class(p1[i], tau1, y[i], m_cov);
+        }
 
-            // new signal estimate
-            for (int i=0; i<N; i++){
-                double m_cov = 0;
-                if (C>0)
-                    m_cov = inner_prod(Z[i], cov_eff, 0);
+        // new MMSE estimate
+        double beta1 = 0;
+        for (int i=0; i<N; i++){
+            double m_cov = 0;
+            if (C>0)
+                m_cov = inner_prod(Z[i], cov_eff, 0);
 
-                z1_hat[i] = g1_bin_class(p1[i], tau1, y[i], m_cov);
-            }
+            beta1 += g1d_bin_class(p1[i], tau1, y[i], m_cov);
+        }
+        if(beta1 >= N)
+            beta1 = N - 1.0;
+        beta1 /= N;
 
-            std::vector<double> z1_hat_m_p1 = z1_hat;
-            for (int i0 = 0; i0 < N; i0++)
-                z1_hat_m_p1[i0] = z1_hat_m_p1[i0] - p1[i0];
-
-            // new MMSE estimate
-            beta1 = 0;
-            for (int i=0; i<N; i++){
-                double m_cov = 0;
-                if (C>0)
-                    m_cov = inner_prod(Z[i], cov_eff, 0);
-
-                beta1 += g1d_bin_class(p1[i], tau1, y[i], m_cov);
-            }
-            if(beta1 >= N)
-                beta1 = N - 1.0;
-            beta1 /= N;
-            double zeta1 = tau1 / beta1;
-
-            //if (it <= 1)
-            //    break;
-
-            //tau1_reEst_prev = tau1;
-            //tau1 = std::min( std::max(  1 / (1/zeta1 + l2_norm2(z1_hat_m_p1, 0)/N), gamma_min ), gamma_max );
-
-            //if ( abs(tau1 - tau1_reEst_prev) < 1e-2 )
-            //    break;
-            
-        //}
-        
         for (int i=0; i<N; i++)
             p2[i] = (z1_hat[i] - beta1*p1[i]) / (1-beta1);
 
@@ -261,8 +204,6 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
         if(rank == 0){
             std::cout << "alpha1 = " << alpha1 << std::endl;
             std::cout << "beta1 = " << beta1 << std::endl;
-            //std::cout << "gam1 = " << gam1 << std::endl;
-            //std::cout << "eta1 = " << eta1 << std::endl;
             std::cout << "tau1 = " << tau1 << std::endl;
         }
 
@@ -303,16 +244,10 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
             v[i] = tau2 * v[i] + gam2 * r2[i];
 
         // running conjugate gradient solver to compute LMMSE
-        std::vector<double> x2_hat_prev = x2_hat;
         x2_hat = precondCG_solver(v, std::vector<double> (M, 0.0), tau2, 1, dataset); // precond_change!
-        
-        // Onsager
-        double alpha2_prev = alpha2;
-        double alpha2 = g2d_onsager(gam2, tau2, dataset);
 
-        //for (int i = 0; i < M; i++)
-        //    x2_hat[i] = rho * x2_hat[i] + (1 - rho) * x2_hat_prev[i];
-        //alpha2 = rho * alpha2 + (1 - rho) * alpha2_prev;
+        // Onsager
+        double alpha2 = g2d_onsager(gam2, tau2, dataset);
 
         // Scaling x2_hat estimates
         std::vector<double> x2_hat_s = x2_hat;
@@ -325,58 +260,22 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
 
         eta2 = gam2 / alpha2;
 
-        // re-estimation of gam2
-        //std::vector<double> x2_hat_m_r2 = x2_hat;
-        //for (int i0 = 0; i0 < x2_hat_m_r2.size(); i0++)
-        //    x2_hat_m_r2[i0] = x2_hat_m_r2[i0] - r2[i0];
-
-        //if (it > 1)
-        //    gam2 = std::min( std::max(  1 / (1/eta2 + l2_norm2(x2_hat_m_r2, 1)/Mt), gamma_min ), gamma_max );
-
-        r1_prev = r1;
         for (int i=0; i<M; i++)
             r1[i] = (x2_hat[i] - alpha2 * r2[i]) / (1 - alpha2);
 
-        // Damping
-        //for (int i=0; i<M; i++)
-        //    r1[i] = rho * r1[i] + (1-rho) * r1_prev[i];
-
-        gam1_prev = gam1;
         gam1 = gam2 * (1-alpha2) / alpha2;
         gam1 = std::min(std::max(gam1, gamma_min ), gamma_max);
 
-        // apply damping 
-        //gam1 = rho * gam1 + (1-rho) * gam1_prev;
-
         // ---------- LMMSE estimation of z ----------- //
         z2_hat = (*dataset).Ax(x2_hat.data());
-        
+
         double beta2 = (double) Mt / N * (1 - alpha2);
 
-        // re-estimation of tau2
-        //std::vector<double> z2_hat_m_p2 = z2_hat;
-        //for (int i0 = 0; i0 < N; i0++)
-        //    z2_hat_m_p2[i0] = z2_hat_m_p2[i0] - p2[i0];
-
-        //double zeta2 = tau2 / beta2;
-
-        //if (it > 1)
-        //    tau2 = 1.0 / (1.0/zeta2 + l2_norm2(z2_hat_m_p2, 0)/N);
-
-        p1_prev = p1;
         for (int i=0; i<N; i++)
             p1[i] = (z2_hat[i] - beta2 * p2[i]) / (1-beta2);
 
-        // Damping
-        //for (int i=0; i<N; i++)
-        //    p1[i] = rho_it * p1[i] + (1 - rho) * p1_prev[i];
-
-        tau1_prev = tau1;
         tau1 = tau2 * (1 - beta2) / beta2;
         tau1 = std::min(std::max(tau1, gamma_min ), gamma_max);
-
-        //  apply damping to z variance
-        //tau1 = rho * tau1 + (1 - rho) * tau1_prev;
 
         // Save and print hyperparameters
         params[4] = alpha2;
@@ -389,7 +288,6 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
             std::cout << "beta2 = " << beta2 << std::endl;
             std::cout << "gam1 = " << gam1 << std::endl;
             std::cout << "gam2 = " << gam2 << std::endl;
-            //std::cout << "eta2 = " << eta2 << std::endl;
             std::cout << "tau2 = " << tau2 << std::endl;
         }
 
@@ -399,7 +297,7 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
 
         total_time += (stop_LMMSE - start_LMMSE) + (stop_denoising - start_denoising) + (stop_covar - start_covar);
 
-        // ------ERROR metrics ------- //  
+        // ------ERROR metrics ------- //
         std::vector<double> z2hat = (*dataset).Ax(x2_hat_s.data());
         std::vector<double> y2_hat = predict_probit(z2hat, 0.5);
 
@@ -461,16 +359,15 @@ std::vector<double> vamp::infere_bin_class( data* dataset ){
                 std::cout << "...maximal number of iterations was achieved. The algorithm might not converge!" << std::endl;
         }
     }
-    
-    return x1_hat;
 
+    return x1_hat;
 }
 
 double vamp::g1_bin_class(double p, double tau1, double y, double m_cov = 0){
 
     double c = (p + m_cov) / sqrt(probit_var + 1.0/tau1);
     double temp;
-    double normalPdf_normalCdf = 2.0 /  sqrt(2*M_PI) / erfcx( - (2*y-1) * c / sqrt(2) );   
+    double normalPdf_normalCdf = 2.0 /  sqrt(2*M_PI) / erfcx( - (2*y-1) * c / sqrt(2) );
     temp = p + (2*y-1) * normalPdf_normalCdf / tau1 / sqrt(probit_var + 1.0/tau1);
 
     return temp;
@@ -501,7 +398,7 @@ double vamp::mlogL_probit(std::vector<double> y, std::vector<double> gg, double 
     return mlogL/N;
 }
 
-std::vector<double> vamp::grad_cov(std::vector<double> y, std::vector<double> gg, double probit_var, std::vector< std::vector<double> > Z, std::vector<double> eta){ 
+std::vector<double> vamp::grad_cov(std::vector<double> y, std::vector<double> gg, double probit_var, std::vector< std::vector<double> > Z, std::vector<double> eta){
     // gg = g_genetics, gc = g_covariates, eta = vector of covariate's effect sizes
 
     std::vector<double> grad(C, 0.0);
@@ -537,10 +434,9 @@ std::vector<double> vamp::Newton_method_cov(std::vector<double> y, std::vector<d
 
             double g_i = gg[i] + inner_prod(Z[i], eta, 0);
             double arg = (2*y[i] - 1) * g_i;
-            double phi_arg = normal_cdf(arg);
             double ratio = 2.0 /  sqrt(2*M_PI) / erfcx( - arg / sqrt(2) );
             lambda(i) = ratio * (2*y[i]-1);
-        
+
             for (int j=0; j<C; j++){
                 Xtm(j,i) = Z[i][j];
                 WXm(i,j) = Z[i][j] * lambda(i) * (lambda(i) + g_i);
@@ -548,11 +444,11 @@ std::vector<double> vamp::Newton_method_cov(std::vector<double> y, std::vector<d
         }
 
         matrix<double> XtmZm = prod(Xtm, WXm);
-        vector<double> RHS = prod(Xtm, lambda);    
+        vector<double> RHS = prod(Xtm, lambda);
         permutation_matrix<double> pm(XtmZm.size1());
-        
+
         int sing = lu_factorize(XtmZm, pm);
-            
+
         if (sing == 0)
             lu_substitute(XtmZm, pm, RHS);
         else
@@ -596,7 +492,7 @@ std::vector<double> vamp::Newton_method_cov(std::vector<double> y, std::vector<d
             std::cout << "[Newton_cov] it = " << it <<", relative err = "<< rel_err << std::endl;
         if (rel_err < 1e-4){
             if (rank == 0)
-                std::cout << "[Newton_cov] relative error <= 1e-4 - stoping criteria satisfied" << std::endl;
+                std::cout << "[Newton_cov] relative error <= 1e-4 - stopping criteria satisfied" << std::endl;
             break;
         }
 
@@ -608,10 +504,10 @@ std::vector<double> vamp::Newton_method_cov(std::vector<double> y, std::vector<d
         if (curr_val > init_val){
             if (rank == 0){
                 std::cout << "previous mlogL = " << init_val << ", current mlogL = " << curr_val << std::endl;
-                std::cout << "likelihood value is not increasing -> terminating Newton-Raphson mehod" << std::endl;
+                std::cout << "likelihood value is not increasing -> terminating Newton-Raphson method" << std::endl;
             }
             break;
-        }    
+        }
     }
     return eta;
 }
@@ -622,7 +518,7 @@ std::vector<double> vamp::predict_probit(std::vector<double> z, double th){
         double prob = normal_cdf(z[i]);
         if (prob >= th)
             y[i] = 1;
-        else 
+        else
             y[i] = 0;
     }
     return y;
@@ -648,8 +544,9 @@ std::vector<int> vamp::confusion_matrix(std::vector<double> y, std::vector<doubl
     conf_mat[2] = FP;
     conf_mat[3] = FN;
 
- return conf_mat;
+    return conf_mat;
 }
+
 double vamp::accuracy(std::vector<int> conf_mat){
 
     int TP = conf_mat[0];
@@ -663,14 +560,13 @@ double vamp::accuracy(std::vector<int> conf_mat){
 }
 
 void vamp::probit_err_measures(data *dataset, int sync, std::vector<double> true_signal, std::vector<double> est, std::string var_name){
-    
+
     // correlation
     double corr = inner_prod(est, true_signal, sync) / sqrt( l2_norm2(est, sync) * l2_norm2(true_signal, sync) );
 
     if ( rank == 0 )
-        std::cout << "correlation " + var_name + " = " << corr << std::endl;  
+        std::cout << "correlation " + var_name + " = " << corr << std::endl;
 
-    
     // l2 signal error
     int len = (int) ( N + (M-N) * sync );
     std::vector<double> temp(len, 0.0);
@@ -682,19 +578,11 @@ void vamp::probit_err_measures(data *dataset, int sync, std::vector<double> true
     if (rank == 0)
         std::cout << "l2 signal error for " + var_name + " = " << l2_signal_err << std::endl;
 
-
-    // precision calculation
-    //double std = calc_stdev(temp, sync);
-
-    //if (rank == 0)
-    //    std::cout << "true precision for " + var_name + " = " << 1.0 / N / std / std << std::endl;
-
-
     // prior distribution parameters
     if (sync == 1){
 
         if (rank == 0)
-        std::cout << "prior variances = ";
+            std::cout << "prior variances = ";
 
         for (int i = 0; i < vars.size(); i++)
             if (rank == 0)
@@ -712,6 +600,4 @@ void vamp::probit_err_measures(data *dataset, int sync, std::vector<double> true
         if (rank == 0)
             std::cout << std::endl;
     }
-    
-    
 }
