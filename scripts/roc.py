@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 eps = 1e-32
 
 # This script visualize ROC curve
-print("...Ploting ROC curve for VAMPomi", flush=True)
+print("...Ploting ROC curve for mVAMP", flush=True)
 print("\n", flush=True)
 
 # Initialize parser

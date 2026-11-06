@@ -4,7 +4,7 @@ import argparse
 import os
 import csv
 
-print("---- Ploting VAMPomi metrics and parameters ----")
+print("---- Ploting mVAMP metrics and parameters ----")
 print("\n",flush=True)
 
 # Initialize parser

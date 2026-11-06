@@ -7,7 +7,7 @@ import os
 from array import array
 
 # This script calculates p values from r1 vector
-print("----- Computing VAMPomi p-values -----")
+print("----- Computing mVAMP p-values -----")
 print("\n", flush=True)
 
 # Initialize parser

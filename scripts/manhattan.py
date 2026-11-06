@@ -7,7 +7,7 @@ import pandas as pd
 import csv
 
 # This script visualize manhattan plot
-print("---------- Association testing for VAMPomi ----------")
+print("---------- Association testing for mVAMP ----------")
 print("\n", flush=True)
 
 # Initialize parser
@@ -68,7 +68,7 @@ plt.figure(figsize=(12,8), dpi=300)
 plt.plot(np.array([0, M]), np.array([-np.log10(pval_th), -np.log10(pval_th)]), "k--")
 plt.xlabel('Chromosome', fontsize=22)
 plt.ylabel(r'$-log_{10}(p)$', fontsize=22)
-plt.title("VAMPomi - %s" % (trait), fontsize=26)
+plt.title("mVAMP - %s" % (trait), fontsize=26)
 
 f = open(pvalfile, "rb")
 buffer = f.read(M * 8)
